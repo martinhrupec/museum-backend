@@ -76,6 +76,7 @@ WSGI_APPLICATION = "core.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# PostgreSQL
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -86,6 +87,14 @@ DATABASES = {
         "PORT": config('DATABASE_PORT', default='5432'),
     }
 }
+
+# SQLite (for quick development)
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.sqlite3",
+#         "NAME": BASE_DIR / "db.sqlite3",
+#     }
+# }
 
 
 # Password validation
@@ -112,7 +121,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Europe/Zagreb"
 
 USE_I18N = True
 
@@ -128,3 +137,6 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Custom User Model
+AUTH_USER_MODEL = "api.User"
