@@ -51,20 +51,32 @@ class User(AbstractUser):
         """
         OVERRIDE: Enforce role-based permissions before saving
         
-        - Superusers must be admins with staff access
-        - Guards cannot have staff access
-        - Admins need staff access
+        Business rules:
+        1. Superusers are always ROLE_ADMIN with is_staff=True
+        2. ROLE_ADMIN users must have is_staff=True (access to Django admin)
+        3. ROLE_GUARD users must have is_staff=False (no admin access)
+        
+        This ensures clean separation between business roles and Django permissions.
         """
-        # Superusers must be admins
+        # Rule 1: Superusers are always admins
         if self.is_superuser:
             self.role = self.ROLE_ADMIN
             self.is_staff = True
-        # Guards cannot have staff access
-        elif self.role == self.ROLE_GUARD:
-            self.is_staff = False
-        # Admins need staff access
+        
+        # Rule 2: Business role drives Django permissions
         elif self.role == self.ROLE_ADMIN:
-            self.is_staff = True
+            self.is_staff = True  # Admins need Django admin access
+        
+        elif self.role == self.ROLE_GUARD:
+            self.is_staff = False  # Guards don't need Django admin
+        
+        # Rule 3: Prevent inconsistent states
+        # If someone tries to manually set is_staff opposite to role, fix it
+        if not self.is_superuser:
+            if self.role == self.ROLE_ADMIN and not self.is_staff:
+                self.is_staff = True  # Force consistency
+            elif self.role == self.ROLE_GUARD and self.is_staff:
+                self.is_staff = False  # Force consistency
         
         super().save(*args, **kwargs)
 
@@ -79,7 +91,8 @@ class Guard(models.Model):
     
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        related_name='guard'
     )
     priority_number = models.DecimalField(
         max_digits=5, 

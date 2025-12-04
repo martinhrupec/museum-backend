@@ -10,8 +10,11 @@ from .api_models import (
 # Inline for displaying Guard info within User admin
 class GuardInline(admin.StackedInline):
     model = Guard
+    fk_name = 'user'  # Explicitly specify the FK field that links to User
     can_delete = False
-    extra = 0
+    # For OneToOne inlines: show blank form if missing, max 1 instance
+    extra = 1
+    max_num = 1
     fields = ('priority_number', 'availability')
     verbose_name = "Guard Profile"
     verbose_name_plural = "Guard Profile"
@@ -20,7 +23,7 @@ class GuardInline(admin.StackedInline):
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     """Custom User admin with role field and full superuser access"""
-    list_display = ['username', 'email', 'role', 'is_active', 'is_staff', 'is_superuser', 'date_joined', 'updated_at']
+    list_display = ['id', 'username', 'email', 'role', 'is_active', 'is_staff', 'is_superuser', 'date_joined', 'updated_at']
     list_filter = ['role', 'is_active', 'is_staff', 'is_superuser', 'date_joined']
     search_fields = ['username', 'email', 'first_name', 'last_name']
     date_hierarchy = 'date_joined'
@@ -28,12 +31,16 @@ class UserAdmin(BaseUserAdmin):
     # Custom actions
     actions = ['mark_inactive', 'mark_active']
     
-    # OVERRIDE: Show Guard inline only for guard users
-    def get_inlines(self, request, obj=None):
+    #OVERRIDE: Show Guard inline only for guard users
+    def get_inline_instances(self, request, obj=None):
+        """Dynamically return inline instances based on the user's role."""
+        inline_instances = []
         if obj and obj.role == User.ROLE_GUARD:
-            return [GuardInline]
-        return []
+            for inline_class in [GuardInline]:
+                inline_instances.append(inline_class(self.model, self.admin_site))
+        return inline_instances
     
+    #OVERRIDE: Customize fieldsets based on user permissions
     def get_fieldsets(self, request, obj=None):
         """Superusers see ALL fields, staff see limited fields"""
         if not obj:
@@ -61,7 +68,8 @@ class UserAdmin(BaseUserAdmin):
                 ('Important dates', {'fields': ('last_login', 'date_joined')}),
             )
     
-    # OVERRIDE: Dynamic fieldsets for adding new users based on permissions
+    #OVERRIDE: Dynamic fieldsets for adding new users
+    # django\contrib\auth\admin.py,
     @property
     def add_fieldsets(self):
         """Can't make this dynamic with request, so use default"""
@@ -72,6 +80,7 @@ class UserAdmin(BaseUserAdmin):
             }),
         )
     
+    #OVERRIDE: Customize available actions based on user permissions
     def get_actions(self, request):
         """Customize available actions based on user permissions"""
         actions = super().get_actions(request)
@@ -83,10 +92,12 @@ class UserAdmin(BaseUserAdmin):
         
         return actions
     
+    #OVERRIDE: Only superusers can delete users
     def has_delete_permission(self, request, obj=None):
         """Only superusers can truly delete users"""
         return request.user.is_superuser
     
+    #OVERRIDE: Control readonly fields based on permissions
     def get_readonly_fields(self, request, obj=None):
         """Make certain fields readonly based on permissions"""
         if request.user.is_superuser:
@@ -120,11 +131,13 @@ class GuardAdmin(admin.ModelAdmin):
     # Custom actions
     actions = ['mark_guard_inactive', 'mark_guard_active']
     
+    #CUSTOM: Display method for list_display
     def get_is_active(self, obj):
         return obj.user.is_active
     get_is_active.boolean = True
     get_is_active.short_description = 'Active'
     
+    #OVERRIDE: Only superusers can delete guards
     def has_delete_permission(self, request, obj=None):
         """Only superusers can truly delete guards"""
         return request.user.is_superuser
@@ -154,11 +167,13 @@ class ExhibitionAdmin(admin.ModelAdmin):
     # Custom actions
     actions = ['duplicate_exhibition']
     
+    #CUSTOM: Display method for list_display
     def position_count(self, obj):
         """Show number of positions for this exhibition"""
         return obj.positions.count()
     position_count.short_description = 'Positions'
     
+    #CUSTOM: Display method for list_display
     def get_status(self, obj):
         if obj.is_active:
             return '🟢 Active'
@@ -212,11 +227,19 @@ class GuardAvailablePositionsAdmin(admin.ModelAdmin):
 @admin.register(AdminNotification)
 class AdminNotificationAdmin(admin.ModelAdmin):
     list_display = ['user', 'exhibition', 'message_preview', 'created_at']
-    list_filter = ['created_at']
+    list_filter = ['created_at', 'user']
     search_fields = ['user__username', 'message', 'exhibition__name']
     date_hierarchy = 'created_at'
-    raw_id_fields = ['user', 'exhibition']
+    raw_id_fields = ['exhibition']  # Only exhibition uses raw_id now
     
+    #OVERRIDE: Filter dropdown to show only admin users
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "user":
+            # Show only admin users in the dropdown
+            kwargs["queryset"] = User.objects.filter(role=User.ROLE_ADMIN)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+    
+    #CUSTOM: Display method for list_display
     def message_preview(self, obj):
         return obj.message[:50]
     message_preview.short_description = 'Message'
@@ -230,6 +253,7 @@ class ReportAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
     raw_id_fields = ['guard', 'position']
     
+    #CUSTOM: Display method for list_display
     def report_preview(self, obj):
         return obj.report_text[:50]
     report_preview.short_description = 'Report'
@@ -243,6 +267,7 @@ class PointAdmin(admin.ModelAdmin):
     date_hierarchy = 'date_awarded'
     raw_id_fields = ['guard']
     
+    #CUSTOM: Display method for list_display
     def explanation_preview(self, obj):
         return obj.explanation[:50]
     explanation_preview.short_description = 'Explanation'
@@ -270,14 +295,17 @@ class SystemSettingsAdmin(admin.ModelAdmin):
         }),
     )
     
+    #OVERRIDE: Prevent adding more than one settings instance
     def has_add_permission(self, request):
         """Prevent adding more than one settings instance"""
         return not SystemSettings.objects.exists()
     
+    #OVERRIDE: Prevent deletion of settings
     def has_delete_permission(self, request, obj=None):
         """Prevent deletion of settings"""
         return False
     
+    #OVERRIDE: Only superusers can see this in admin
     def has_module_permission(self, request):
         """Only superusers can see this in admin"""
         return request.user.is_superuser

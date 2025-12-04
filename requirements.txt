@@ -1,5 +1,7 @@
 django
 djangorestframework
+djangorestframework-simplejwt
+PyJWT
 pyyaml
 requests
 django-cors-headers
@@ -7,5 +9,9 @@ psycopg2-binary
 psycopg2
 celery
 redis
-python-decouple
-djangorestframework-simplejwt
+python-dotenv
+django-environ
+django-debug-toolbar
+asgiref
+pytz
+sqlparse

@@ -4,6 +4,7 @@ from .schedule import Exhibition, Position, PositionHistory
 from .calculation import Point, GuardAvailablePositions
 from .textual_model import AdminNotification, Report
 from .system_settings import SystemSettings
+from .preferences import GuardExhibitionPreference, GuardPositionPreference
 
 __all__ = [
     # User models
@@ -23,4 +24,7 @@ __all__ = [
     'Report',
     # Settings
     'SystemSettings',
+    # Preferences
+    'GuardExhibitionPreference',
+    'GuardPositionPreference',
 ]
