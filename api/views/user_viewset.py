@@ -1,18 +1,16 @@
-from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework import viewsets, status, permissions, serializers
+from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
-from .api_models import User, Guard, Exhibition
-from .serializers import (
+from ..api_models import User
+from ..serializers import (
     UserBasicSerializer, UserDetailSerializer, UserAdminSerializer,
-    ChangePasswordSerializer,
-    GuardBasicSerializer, GuardDetailSerializer, GuardAdminSerializer,
-    ExhibitionBasicSerializer, ExhibitionDetailSerializer, ExhibitionAdminSerializer
+    ChangePasswordSerializer
 )
-from .permissions import IsAdminRole, IsAdminOrOwner
+from ..permissions import IsAdminRole, IsAdminOrOwner
+from ..mixins import AuditLogMixin
 
 
-class UserViewSet(viewsets.ModelViewSet):
+class UserViewSet(AuditLogMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing users with role-based access control.
     
@@ -67,8 +65,7 @@ class UserViewSet(viewsets.ModelViewSet):
                 return User.objects.all()
             return User.objects.filter(is_active=True)
         else:
-            # Guards can only see themselves
-            return User.objects.filter(id=self.request.user.id, is_active=True)
+            return User.objects.filter(is_active=True)
 
     def get_permissions(self):
         """Set permissions based on action using custom role-based permissions"""
@@ -115,44 +112,3 @@ class UserViewSet(viewsets.ModelViewSet):
             serializer.save()
             return Response({'message': 'Lozinka je uspješno promijenjena.'})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-# Create your views here.
-
-# django rest framework api way
-from rest_framework.decorators import api_view
-@api_view(['GET'])
-def hello_world(request):
-    return Response({"message": "Hello from API!"})
-
-# standard django way
-from django.http import JsonResponse
-import json
-def api_home(request, *args, **kwargs):
-    body = request.body  # raw body as a byte string (of JSON data)
-    #print("Request body:", body)
-    #print("Request body type:", type(body))
-    data = {}
-    try:
-        data = json.loads(body)  # try to parse JSON data
-    except:
-        pass
-    #print("Data:", data)  # log the parsed data
-    #print(data.keys())
-    #print("Request headers:", request.headers)
-    #print(type(request.headers))
-    #print("Request headers as a dict:", dict(request.headers))
-    #print(json.dumps(dict(request.headers), indent=4))
-
-    # JsonResponse cannot serialize 'django.http.request.HttpHeaders' object. 
-    # it can only serialize standard data types like dict, list, str, int, float, tuple etc.
-    data["headers"] = dict(request.headers)
-    #print("Request content type:", request.content_type)
-    #print(type(request.content_type))
-    data["content_type"] = request.content_type
-    data["params"] = dict(request.GET)
-    print("Data for JsonResponse:", data)
-    #print("url query params:", request.GET)
-
-    #return JsonResponse({"status": "API is running"})
-    return JsonResponse(data)

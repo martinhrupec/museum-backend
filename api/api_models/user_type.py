@@ -3,6 +3,9 @@ from django.dispatch import receiver
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
 from django.conf import settings
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 class ActiveUserManager(UserManager):
@@ -78,7 +81,28 @@ class User(AbstractUser):
             elif self.role == self.ROLE_GUARD and self.is_staff:
                 self.is_staff = False  # Force consistency
         
+        # Track role changes for logging
+        is_new = not self.pk
+        old_role = None
+        if not is_new:
+            try:
+                old_instance = User.objects.get(pk=self.pk)
+                old_role = old_instance.role
+            except User.DoesNotExist:
+                pass
+        
         super().save(*args, **kwargs)
+        
+        # Log role changes (after save to ensure pk exists)
+        if not is_new and old_role and old_role != self.role:
+            logger.info(
+                "user_role_changed",
+                user_id=self.id,
+                username=self.username,
+                old_role=old_role,
+                new_role=self.role,
+                is_staff=self.is_staff
+            )
 
 
 class Guard(models.Model):
@@ -104,7 +128,12 @@ class Guard(models.Model):
     availability = models.IntegerField(
         null=True, 
         blank=True,
-        help_text="Availability score for scheduling"
+        help_text="Number of shifts guard is available for next week"
+    )
+    availability_updated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time availability was updated"
     )
     
     # Many-to-many relationships through intermediate models
@@ -113,11 +142,8 @@ class Guard(models.Model):
         through='PositionHistory',
         related_name='guards_from_history'
     )
-    available_positions = models.ManyToManyField(
-        'Position',
-        through='GuardAvailablePositions',
-        related_name='available_guards'
-    )
+    # NOTE: available_positions removed - replaced with GuardWorkPeriod system
+    # Guards now select time periods (day + shift), positions calculated dynamically
     positions_from_reports = models.ManyToManyField(
         'Position',
         through='Report',
@@ -145,7 +171,18 @@ def create_guard_profile(sender, instance, created, **kwargs):
     
     # Create Guard profile for guard users
     if instance.role == User.ROLE_GUARD:
-        Guard.objects.create(user=instance)
+        guard = Guard.objects.create(user=instance)
+        
+        logger.info(
+            "guard_profile_created",
+            user_id=instance.id,
+            username=instance.username,
+            guard_id=guard.id
+        )
+        
+        # Assign initial priority based on average of existing guards
+        from background_tasks.tasks import assign_initial_priority_to_new_guard
+        assign_initial_priority_to_new_guard(guard)
     
     # Add admin users to Museum Admin group for permissions
     elif instance.role == User.ROLE_ADMIN and not instance.is_superuser:

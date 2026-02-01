@@ -1,4 +1,18 @@
 venv/
+.venv/
 __pycache__/
 *.pyc
 .env
+.env.local
+logs/
+*.log
+deployment/
+.env.example
+
+# Docker
+backups/
+nginx/ssl/
+
+# IDE
+.vscode/
+.idea/

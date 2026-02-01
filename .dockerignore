@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Django
+*.log
+db.sqlite3
+db.sqlite3-journal
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Documentation
+*.md
+DEPLOYMENT_CHECKLIST.md
+DOCKER_DEPLOYMENT.md
+ROADMAP.md
+
+# Deployment configs (već kopirani u image)
+deployment/
+
+# Backups
+backups/
+*.sql
+
+# Logs
+logs/
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Tests (opciono - možeš zakomentirati ako želiš testove u imageu)
+# api/tests/
+# pytest.ini

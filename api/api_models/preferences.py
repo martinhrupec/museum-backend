@@ -1,15 +1,18 @@
 from django.db import models
+from django.contrib.postgres.fields import ArrayField
+from django.core.exceptions import ValidationError
+from .system_settings import SystemSettings
 
 
 class GuardExhibitionPreference(models.Model):
     """
-    Guard's ranking preferences for exhibitions.
+    Guard's ranked exhibition preferences stored as a single bulk record.
     
-    Tracks the order in which a guard prefers exhibitions.
-    Lower ordinal_number = higher preference (1 = most preferred).
+    Stores ordered array of exhibition IDs (first = highest priority).
+    Can be saved as template for future weeks if exhibition set remains the same.
     
-    If guard doesn't set preferences, no records exist for that guard.
-    Normalization and priority calculation happens in the assignment algorithm.
+    Template validation: Weekly task compares historical exhibition set
+    (from created_at week) with next_week set. If different, template invalidated.
     """
     
     guard = models.ForeignKey(
@@ -17,65 +20,109 @@ class GuardExhibitionPreference(models.Model):
         on_delete=models.CASCADE,
         related_name='exhibition_preferences'
     )
-    exhibition = models.ForeignKey(
-        'Exhibition',
-        on_delete=models.CASCADE,
-        related_name='guard_preferences'
+    exhibition_order = ArrayField(
+        models.IntegerField(),
+        help_text="Ordered array of exhibition IDs (first = most preferred)"
     )
-    ordinal_number = models.PositiveIntegerField(
-        help_text="Order of preference: 1 = most preferred, 2 = second, etc."
+    is_template = models.BooleanField(
+        default=False,
+        help_text="If true, preferences saved for future weeks (validated weekly)"
     )
-    created_at = models.DateTimeField(auto_now=True)
+    next_week_start = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Start date of week these preferences apply to (null if template)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def clean(self):
+        """Validate next_week_start based on is_template."""
+        if self.is_template and self.next_week_start is not None:
+            raise ValidationError({
+                'next_week_start': 'next_week_start must be null when is_template is True'
+            })
+        if not self.is_template and self.next_week_start is None:
+            raise ValidationError({
+                'next_week_start': 'next_week_start must be set when is_template is False'
+            })
+    
+    def save(self, *args, **kwargs):
+        """Run validation before saving."""
+        self.full_clean()
+        super().save(*args, **kwargs)
     
     class Meta:
-        unique_together = ('guard', 'exhibition')
         verbose_name = "Guard Exhibition Preference"
         verbose_name_plural = "Guard Exhibition Preferences"
-        ordering = ['guard', 'ordinal_number']
+        ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['guard', 'ordinal_number']),
+            models.Index(fields=['guard', 'is_template']),
+            models.Index(fields=['guard', 'next_week_start']),
             models.Index(fields=['created_at']),
         ]
     
     def __str__(self):
-        return f"{self.guard.user.username} - {self.exhibition.name}: #{self.ordinal_number}"
+        context = "Template" if self.is_template else f"Week {self.next_week_start}"
+        return f"{self.guard.user.username} - {len(self.exhibition_order)} exhibitions ({context})"
 
 
-class GuardPositionPreference(models.Model):
+class GuardDayPreference(models.Model):
     """
-    Guard's ranking preferences for specific positions.
+    Guard's ranked day preferences stored as a single bulk record.
     
-    More granular than exhibition preferences - allows guards to rank
-    specific time slots within exhibitions.
+    Stores ordered array of day_of_week integers (first = highest priority).
+    Can be saved as template for future weeks if workday set remains the same.
     
-    Lower ordinal_number = higher preference (1 = most preferred).
+    Template validation: Weekly task compares historical workday set
+    (from created_at week) with next_week set. If different, template invalidated.
     """
     
     guard = models.ForeignKey(
         'Guard',
         on_delete=models.CASCADE,
-        related_name='position_preferences'
+        related_name='day_preferences'
     )
-    position = models.ForeignKey(
-        'Position',
-        on_delete=models.CASCADE,
-        related_name='guard_preferences'
+    day_order = ArrayField(
+        models.IntegerField(choices=SystemSettings.WEEKDAY_CHOICES),
+        help_text="Ordered array of days (0=Mon, 6=Sun, first = most preferred)"
     )
-    ordinal_number = models.PositiveIntegerField(
-        help_text="Order of preference: 1 = most preferred, 2 = second, etc."
+    is_template = models.BooleanField(
+        default=False,
+        help_text="If true, preferences saved for future weeks (validated weekly)"
     )
-    created_at = models.DateTimeField(auto_now=True)
+    next_week_start = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Start date of week these preferences apply to (null if template)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def clean(self):
+        """Validate next_week_start based on is_template."""
+        if self.is_template and self.next_week_start is not None:
+            raise ValidationError({
+                'next_week_start': 'next_week_start must be null when is_template is True'
+            })
+        if not self.is_template and self.next_week_start is None:
+            raise ValidationError({
+                'next_week_start': 'next_week_start must be set when is_template is False'
+            })
+    
+    def save(self, *args, **kwargs):
+        """Run validation before saving."""
+        self.full_clean()
+        super().save(*args, **kwargs)
     
     class Meta:
-        unique_together = ('guard', 'position')
-        verbose_name = "Guard Position Preference"
-        verbose_name_plural = "Guard Position Preferences"
-        ordering = ['guard', 'ordinal_number']
+        verbose_name = "Guard Day Preference"
+        verbose_name_plural = "Guard Day Preferences"
+        ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['guard', 'ordinal_number']),
+            models.Index(fields=['guard', 'is_template']),
+            models.Index(fields=['guard', 'next_week_start']),
             models.Index(fields=['created_at']),
         ]
     
     def __str__(self):
-        return f"{self.guard.user.username} - {self.position.exhibition.name} " \
-               f"{self.position.date} {self.position.start_time}: #{self.ordinal_number}"
+        context = "Template" if self.is_template else f"Week {self.next_week_start}"
+        return f"{self.guard.user.username} - {len(self.day_order)} days ({context})"

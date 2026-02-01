@@ -1,6 +1,11 @@
 from rest_framework import serializers
 from django.db import models
-from .api_models import User, Guard, Exhibition
+from .api_models import (
+    User, Guard, Exhibition, Position, PositionHistory, Point,
+    GuardAvailablePositions, AdminNotification, Report, SystemSettings,
+    GuardExhibitionPreference, GuardDayPreference, NonWorkingDay, GuardWorkPeriod,
+    AuditLog
+)
 
 
 # ========================================
@@ -159,7 +164,7 @@ class GuardBasicSerializer(serializers.ModelSerializer):
     class Meta:
         model = Guard
         fields = ['id', 'username', 'full_name', 'is_active', 'priority_number']
-        read_only_fields = ['id', 'username', 'full_name', 'is_active']
+        read_only_fields = ['id', 'username', 'full_name', 'is_active', 'priority_number']
     
     def get_full_name(self, obj):
         full_name = f"{obj.user.first_name} {obj.user.last_name}".strip()
@@ -181,7 +186,7 @@ class GuardDetailSerializer(serializers.ModelSerializer):
             'id', 'user', 'priority_number', 'availability', 
             'total_points', 'recent_positions_count'
         ]
-        read_only_fields = ['id', 'user', 'total_points', 'recent_positions_count']
+        read_only_fields = ['id', 'user', 'priority_number', 'total_points', 'recent_positions_count']
     
     def get_total_points(self, obj):
         """Calculate total points for this guard"""
@@ -202,6 +207,12 @@ class GuardAdminSerializer(serializers.ModelSerializer):
     """
     Admin-level Guard serializer with full management capabilities.
     Includes user admin data and all guard statistics.
+    
+    NOTE: Admins can read all fields but cannot modify:
+    - priority_number (system-managed)
+    - availability (guard-only via set_availability action)
+    
+    Admins can only modify guard via user fields (username, password, is_active).
     """
     user = UserAdminSerializer(read_only=True)
     total_points = serializers.SerializerMethodField()
@@ -213,7 +224,7 @@ class GuardAdminSerializer(serializers.ModelSerializer):
             'id', 'user', 'priority_number', 'availability',
             'total_points', 'position_stats'
         ]
-        read_only_fields = ['id', 'user', 'total_points', 'position_stats']
+        read_only_fields = ['id', 'user', 'priority_number', 'availability', 'total_points', 'position_stats']
     
     def get_total_points(self, obj):
         from django.db import models
@@ -265,14 +276,15 @@ class ExhibitionBasicSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exhibition
         fields = [
-            'id', 'name', 'start_date', 'end_date', 
-            'status', 'duration_days', 'number_of_positions'
+            'id', 'name', 'start_date', 'end_date', 'open_on',
+            'status', 'duration_days', 'number_of_positions',
+            'is_special_event', 'event_start_time', 'event_end_time'
         ]
         read_only_fields = ['id', 'status', 'duration_days']
     
     def get_status(self, obj):
         """Return exhibition status"""
-        if obj.is_active:
+        if obj.is_active():
             return 'active'
         elif obj.is_upcoming:
             return 'upcoming'
@@ -297,9 +309,10 @@ class ExhibitionDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exhibition
         fields = [
-            'id', 'name', 'number_of_positions', 'start_date', 'end_date',
+            'id', 'name', 'number_of_positions', 'start_date', 'end_date', 'open_on',
             'rules', 'status', 'duration_days', 'position_count', 
-            'assigned_positions', 'created_at', 'updated_at'
+            'assigned_positions', 'created_at', 'updated_at',
+            'is_special_event', 'event_start_time', 'event_end_time'
         ]
         read_only_fields = [
             'id', 'status', 'duration_days', 'position_count', 
@@ -307,7 +320,7 @@ class ExhibitionDetailSerializer(serializers.ModelSerializer):
         ]
     
     def get_status(self, obj):
-        if obj.is_active:
+        if obj.is_active():
             return 'active'
         elif obj.is_upcoming:
             return 'upcoming'
@@ -326,7 +339,11 @@ class ExhibitionDetailSerializer(serializers.ModelSerializer):
         from .api_models import PositionHistory
         assigned_position_ids = PositionHistory.objects.filter(
             position__exhibition=obj,
-            action=PositionHistory.Action.ASSIGNED
+            action__in=[
+                PositionHistory.Action.ASSIGNED,
+                PositionHistory.Action.REPLACED,
+                PositionHistory.Action.SWAPPED,
+            ]
         ).values_list('position_id', flat=True).distinct()
         
         return len(assigned_position_ids)
@@ -345,17 +362,31 @@ class ExhibitionAdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = Exhibition
         fields = [
-            'id', 'name', 'number_of_positions', 'start_date', 'end_date',
+            'id', 'name', 'number_of_positions', 'start_date', 'end_date', 'open_on',
             'rules', 'status', 'duration_days', 'position_stats', 
-            'guard_stats', 'created_at', 'updated_at'
+            'guard_stats', 'created_at', 'updated_at',
+            'is_special_event', 'event_start_time', 'event_end_time'
         ]
         read_only_fields = [
             'id', 'status', 'duration_days', 'position_stats', 
             'guard_stats', 'created_at', 'updated_at'
         ]
     
+    def validate_open_on(self, value):
+        """Validate that open_on days are subset of museum workdays"""
+        from .api_models import SystemSettings
+        settings = SystemSettings.load()
+        
+        if not set(value).issubset(set(settings.workdays)):
+            raise serializers.ValidationError(
+                f"Exhibition days must be a subset of museum workdays. "
+                f"Museum workdays: {settings.workdays}, Provided: {value}"
+            )
+        
+        return value
+    
     def get_status(self, obj):
-        if obj.is_active:
+        if obj.is_active():
             return 'active'
         elif obj.is_upcoming:
             return 'upcoming'
@@ -372,7 +403,11 @@ class ExhibitionAdminSerializer(serializers.ModelSerializer):
         total_positions = obj.positions.count()
         assigned_position_ids = PositionHistory.objects.filter(
             position__exhibition=obj,
-            action=PositionHistory.Action.ASSIGNED
+            action__in=[
+                PositionHistory.Action.ASSIGNED,
+                PositionHistory.Action.REPLACED,
+                PositionHistory.Action.SWAPPED,
+            ]
         ).values_list('position_id', flat=True).distinct()
         
         cancelled_position_ids = PositionHistory.objects.filter(
@@ -399,13 +434,435 @@ class ExhibitionAdminSerializer(serializers.ModelSerializer):
         # Get unique guards assigned to this exhibition
         guard_ids = PositionHistory.objects.filter(
             position__exhibition=obj,
-            action=PositionHistory.Action.ASSIGNED
+            action__in=[
+                PositionHistory.Action.ASSIGNED,
+                PositionHistory.Action.REPLACED,
+                PositionHistory.Action.SWAPPED,
+            ]
         ).values_list('guard_id', flat=True).distinct()
         
         return {
             'unique_guards_assigned': len(guard_ids),
             'total_assignments': PositionHistory.objects.filter(
                 position__exhibition=obj,
-                action=PositionHistory.Action.ASSIGNED
+                action__in=[
+                    PositionHistory.Action.ASSIGNED,
+                    PositionHistory.Action.REPLACED,
+                    PositionHistory.Action.SWAPPED,
+                ]
             ).count()
         }
+
+
+# ========================================
+# POSITION SERIALIZERS
+# ========================================
+
+class PositionBasicSerializer(serializers.ModelSerializer):
+    """Basic Position info for lists"""
+    exhibition_name = serializers.CharField(source='exhibition.name', read_only=True)
+    is_special_event = serializers.BooleanField(read_only=True)
+    
+    class Meta:
+        model = Position
+        fields = ['id', 'exhibition', 'exhibition_name', 'date', 'start_time', 'end_time', 'is_special_event']
+        read_only_fields = ['id', 'exhibition_name', 'is_special_event']
+
+
+class PositionDetailSerializer(serializers.ModelSerializer):
+    """Detailed Position with exhibition and assignment info"""
+    exhibition = ExhibitionBasicSerializer(read_only=True)
+    exhibition_id = serializers.PrimaryKeyRelatedField(
+        queryset=Exhibition.objects.all(),
+        source='exhibition',
+        write_only=True
+    )
+    assigned_guard = serializers.SerializerMethodField()
+    is_special_event = serializers.BooleanField(read_only=True)
+    
+    class Meta:
+        model = Position
+        fields = [
+            'id', 'exhibition', 'exhibition_id', 'date', 'start_time', 'end_time',
+            'assigned_guard', 'is_special_event', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'assigned_guard', 'is_special_event', 'created_at', 'updated_at']
+    
+    def get_assigned_guard(self, obj):
+        """Get currently assigned guard if any"""
+        from .api_models import PositionHistory
+        latest = obj.position_histories.filter(
+            action__in=[
+                PositionHistory.Action.ASSIGNED,
+                PositionHistory.Action.REPLACED,
+                PositionHistory.Action.SWAPPED,
+            ]
+        ).order_by('-action_time', '-id').first()
+        
+        if latest:
+            return GuardBasicSerializer(latest.guard).data
+        return None
+
+
+# ========================================
+# POSITION HISTORY SERIALIZERS
+# ========================================
+
+class PositionHistorySerializer(serializers.ModelSerializer):
+    """Position history for audit trail"""
+    guard = GuardBasicSerializer(read_only=True)
+    position = PositionBasicSerializer(read_only=True)
+    guard_id = serializers.PrimaryKeyRelatedField(
+        queryset=Guard.objects.all(),
+        source='guard',
+        write_only=True,
+        required=False
+    )
+    position_id = serializers.PrimaryKeyRelatedField(
+        queryset=Position.objects.all(),
+        source='position',
+        write_only=True,
+        required=False
+    )
+    
+    class Meta:
+        model = PositionHistory
+        fields = ['id', 'position', 'guard', 'position_id', 'guard_id', 'action', 'action_time']
+        read_only_fields = ['id', 'action_time']
+
+
+class AssignedPositionScheduleSerializer(serializers.Serializer):
+    """Serializer for current assignment snapshot per position"""
+    position = PositionBasicSerializer(read_only=True)
+    guard = GuardBasicSerializer(read_only=True, allow_null=True)
+    is_taken = serializers.BooleanField()
+    last_action = serializers.CharField()
+    last_action_time = serializers.DateTimeField(allow_null=True)
+
+
+# ========================================
+# POINT SERIALIZERS
+# ========================================
+
+class PointSerializer(serializers.ModelSerializer):
+    """Point record for guard scoring"""
+    guard_name = serializers.CharField(source='guard.user.username', read_only=True)
+    
+    class Meta:
+        model = Point
+        fields = ['id', 'guard', 'guard_name', 'points', 'date_awarded', 'explanation']
+        read_only_fields = ['id', 'guard_name', 'date_awarded']
+
+
+# ========================================
+# GUARD WORK PERIOD SERIALIZERS
+# ========================================
+
+class GuardWorkPeriodSerializer(serializers.ModelSerializer):
+    """Serializer for guard work periods (time-based availability)"""
+    
+    class Meta:
+        model = GuardWorkPeriod
+        fields = ['id', 'guard', 'day_of_week', 'shift_type', 'is_template', 'next_week_start', 'created_at']
+        read_only_fields = ['id', 'guard', 'created_at']
+    
+    def validate_day_of_week(self, value):
+        """Validate day of week is between 0-6"""
+        if not (0 <= value <= 6):
+            raise serializers.ValidationError("Day of week must be between 0 (Monday) and 6 (Sunday)")
+        return value
+    
+    def validate_shift_type(self, value):
+        """Validate shift type is morning or afternoon"""
+        if value not in ['morning', 'afternoon']:
+            raise serializers.ValidationError("Shift type must be 'morning' or 'afternoon'")
+        return value
+
+
+# ========================================
+# GUARD AVAILABLE POSITIONS SERIALIZERS
+# ========================================
+
+class GuardAvailablePositionsSerializer(serializers.ModelSerializer):
+    """Guard availability for positions"""
+    guard = GuardBasicSerializer(read_only=True)
+    position = PositionBasicSerializer(read_only=True)
+    
+    class Meta:
+        model = GuardAvailablePositions
+        fields = ['id', 'guard', 'position', 'score', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+# ========================================
+# ADMIN NOTIFICATION SERIALIZERS
+# ========================================
+
+class AdminNotificationSerializer(serializers.ModelSerializer):
+    """
+    Admin notifications/announcements with cast types.
+    
+    Cast Types:
+    - broadcast: Shown to all users
+    - unicast: Shown to specific user (to_user_id required)
+    - multicast: Shown to guards on specific positions (notification_date required, 
+                 optionally filtered by shift_type and/or exhibition_id)
+    """
+    created_by = UserBasicSerializer(read_only=True)
+    to_user = UserBasicSerializer(read_only=True)
+    exhibition = ExhibitionBasicSerializer(read_only=True)
+    
+    # Write fields for creating notifications
+    created_by_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    to_user_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    exhibition_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    
+    class Meta:
+        model = AdminNotification
+        fields = [
+            'id', 'created_by', 'created_by_id', 'title', 'message', 
+            'cast_type', 'to_user', 'to_user_id', 
+            'notification_date', 'shift_type',
+            'exhibition', 'exhibition_id',
+            'expires_at',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate(self, attrs):
+        """Validate notification based on cast_type"""
+        cast_type = attrs.get('cast_type', AdminNotification.CAST_BROADCAST)
+        
+        if cast_type == AdminNotification.CAST_UNICAST:
+            if not attrs.get('to_user_id'):
+                raise serializers.ValidationError(
+                    "Unicast notification must have to_user_id set."
+                )
+        
+        elif cast_type == AdminNotification.CAST_MULTICAST:
+            if not attrs.get('notification_date'):
+                raise serializers.ValidationError(
+                    "Multicast notification must have notification_date set."
+                )
+        
+        return attrs
+
+
+# ========================================
+# REPORT SERIALIZERS
+# ========================================
+
+class ReportSerializer(serializers.ModelSerializer):
+    """Guard reports about positions"""
+    guard = GuardBasicSerializer(read_only=True)
+    position = PositionBasicSerializer(read_only=True)
+    position_id = serializers.PrimaryKeyRelatedField(
+        queryset=Position.objects.all(),
+        source='position',
+        write_only=True,
+        required=True
+    )
+    
+    class Meta:
+        model = Report
+        fields = [
+            'id', 'guard', 'position', 'position_id', 
+            'report_text', 'created_at'
+        ]
+        read_only_fields = ['id', 'guard', 'created_at']
+
+
+# ========================================
+# SYSTEM SETTINGS SERIALIZERS
+# ========================================
+
+class SystemSettingsSerializer(serializers.ModelSerializer):
+    """System-wide settings with version history"""
+    
+    updated_by_name = serializers.CharField(source='updated_by.get_full_name', read_only=True)
+    
+    # Read-only computed fields (derived from assignment time)
+    config_start_day = serializers.IntegerField(read_only=True)
+    config_start_time = serializers.TimeField(read_only=True)
+    config_end_day = serializers.IntegerField(read_only=True)
+    config_end_time = serializers.TimeField(read_only=True)
+    manual_assignment_day = serializers.IntegerField(read_only=True)
+    manual_assignment_time = serializers.TimeField(read_only=True)
+    manual_assignment_end_day = serializers.IntegerField(read_only=True, allow_null=True)
+    manual_assignment_end_time = serializers.TimeField(read_only=True, allow_null=True)
+    timing_windows = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = SystemSettings
+        fields = [
+            'id', 'workdays', 
+            'this_week_start', 'this_week_end',
+            'next_week_start', 'next_week_end',
+            # Automated assignment (admin-controlled)
+            'day_for_assignments', 'time_of_assignments',
+            # Computed timing (read-only)
+            'config_start_day', 'config_start_time',
+            'config_end_day', 'config_end_time',
+            'manual_assignment_day', 'manual_assignment_time',
+            'manual_assignment_end_day', 'manual_assignment_end_time',
+            'timing_windows',
+            # Point system
+            'points_life_weeks',
+            'minimal_number_of_positions_in_week', 'award_for_position_completion',
+            'award_for_sunday_position_completion', 
+            'award_for_jumping_in_on_cancelled_position',
+            'penalty_for_being_late_with_notification',
+            'penalty_for_being_late_without_notification',
+            'penalty_for_position_cancellation_on_the_position_day',
+            'penalty_for_position_cancellation_before_the_position_day',
+            'penalty_for_assigning_less_then_minimal_positions',
+            # Payroll
+            'hourly_rate',
+            # Shift times
+            'weekday_morning_start', 'weekday_morning_end',
+            'weekday_afternoon_start', 'weekday_afternoon_end',
+            'weekend_morning_start', 'weekend_morning_end',
+            'weekend_afternoon_start', 'weekend_afternoon_end',
+            'created_at', 'updated_by', 'updated_by_name', 'is_active'
+        ]
+        read_only_fields = [
+            'id', 'created_at', 'updated_by', 'updated_by_name', 'is_active', 
+            'this_week_start', 'this_week_end', 'next_week_start', 'next_week_end',
+            'timing_windows',
+            # Assignment timing is controlled by Celery Beat schedule in settings.py
+            'day_for_assignments', 'time_of_assignments',
+            # Shift times are hardcoded for cron jobs - cannot be changed
+            'weekday_morning_start', 'weekday_morning_end',
+            'weekday_afternoon_start', 'weekday_afternoon_end',
+            'weekend_morning_start', 'weekend_morning_end',
+            'weekend_afternoon_start', 'weekend_afternoon_end'
+        ]
+
+    def get_timing_windows(self, obj):
+        return obj.timing_windows
+
+
+# ========================================
+# PREFERENCE SERIALIZERS
+# ========================================
+
+class GuardExhibitionPreferenceSerializer(serializers.ModelSerializer):
+    """Guard's exhibition preferences - bulk storage with template support"""
+    guard = GuardBasicSerializer(read_only=True)
+    
+    class Meta:
+        model = GuardExhibitionPreference
+        fields = ['id', 'guard', 'exhibition_order', 'is_template', 'next_week_start', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class GuardDayPreferenceSerializer(serializers.ModelSerializer):
+    """Guard's day preferences - bulk storage with template support"""
+    guard = GuardBasicSerializer(read_only=True)
+    
+    class Meta:
+        model = GuardDayPreference
+        fields = ['id', 'guard', 'day_order', 'is_template', 'next_week_start', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+# ========================================
+# NON-WORKING DAY SERIALIZERS
+# ========================================
+
+class NonWorkingDaySerializer(serializers.ModelSerializer):
+    """Non-working days serializer"""
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    
+    class Meta:
+        model = NonWorkingDay
+        fields = [
+            'id', 'date', 'is_full_day', 'non_working_shift', 'reason',
+            'created_by', 'created_by_username', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_username', 'created_at']
+    
+    def validate(self, data):
+        """Validate that non_working_shift is provided if not full day"""
+        if not data.get('is_full_day') and not data.get('non_working_shift'):
+            raise serializers.ValidationError({
+                'non_working_shift': 'Ovo polje je obavezno kada dan nije potpuno neradni.'
+            })
+        return data
+
+
+# ========================================
+# POSITION SWAP REQUEST SERIALIZERS
+# ========================================
+
+class PositionSwapRequestSerializer(serializers.ModelSerializer):
+    """Position swap request serializer"""
+    requesting_guard_name = serializers.CharField(
+        source='requesting_guard.user.get_full_name',
+        read_only=True
+    )
+    position_to_swap_details = PositionBasicSerializer(
+        source='position_to_swap',
+        read_only=True
+    )
+    accepted_by_guard_name = serializers.CharField(
+        source='accepted_by_guard.user.get_full_name',
+        read_only=True,
+        allow_null=True
+    )
+    position_offered_details = PositionBasicSerializer(
+        source='position_offered_in_return',
+        read_only=True,
+        allow_null=True
+    )
+    
+    class Meta:
+        from api.api_models.textual_model import PositionSwapRequest
+        model = PositionSwapRequest
+        fields = [
+            'id', 'requesting_guard', 'requesting_guard_name',
+            'position_to_swap', 'position_to_swap_details',
+            'status', 'accepted_by_guard', 'accepted_by_guard_name',
+            'position_offered_in_return', 'position_offered_details',
+            'expires_at', 'created_at', 'accepted_at'
+        ]
+        read_only_fields = [
+            'id', 'requesting_guard', 'requesting_guard_name',
+            'status', 'accepted_by_guard', 'accepted_by_guard_name',
+            'position_offered_in_return', 'position_offered_details',
+            'created_at', 'accepted_at'
+        ]
+
+
+class EligibleSwapRequestSerializer(serializers.Serializer):
+    """
+    Serializer for swap requests shown to eligible guards.
+    Includes positions the guard can offer in return.
+    """
+    swap_request = PositionSwapRequestSerializer(read_only=True)
+    positions_can_offer = PositionBasicSerializer(many=True, read_only=True)
+
+
+# ========================================
+# AUDIT LOG SERIALIZERS
+# ========================================
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    """
+    Audit log serializer for tracking admin actions.
+    Read-only serializer showing complete audit trail.
+    """
+    user_name = serializers.CharField(source='user.username', read_only=True)
+    user_full_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    action_display = serializers.CharField(source='get_action_display', read_only=True)
+    
+    class Meta:
+        model = AuditLog
+        fields = [
+            'id', 'user', 'user_name', 'user_full_name',
+            'action', 'action_display',
+            'model_name', 'object_id', 'object_repr',
+            'changes', 'ip_address', 'user_agent',
+            'timestamp'
+        ]
+        read_only_fields = fields  # All fields are read-only

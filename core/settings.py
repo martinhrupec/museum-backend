@@ -43,20 +43,41 @@ ALLOWED_HOSTS = env('ALLOWED_HOSTS')
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ),
     "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.AllowAny",  # Temporarily for testing
+        "rest_framework.permissions.IsAuthenticated",
     ),
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.UserRateThrottle",
         "rest_framework.throttling.AnonRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        'user': '100/min',
-        'anon': '10/min',
+        # Global rates (apply to all endpoints by default)
+        'user': '100/m',  # 100 per minute
+        'anon': '10/m',   # 10 per minute
+        
+        # Custom scopes for specific actions
+        'assign_position': '10/m',    # 10 per minute
+        'cancel_position': '10/m',    # 10 per minute
+        'swap_request': '10/m',       # 10 per minute
+        'accept_swap': '10/m',        # 10 per minute
+        'bulk_cancel': '5/h',         # 5 per hour
+        'login': '60/h',              # 60 per hour
+        'register': '3/h',            # 3 per hour
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+# OpenAPI/Swagger configuration
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Museum Guard Scheduling API',
+    'DESCRIPTION': 'API for museum guard position scheduling, assignment, and management',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
 }
 
 SIMPLE_JWT = {
@@ -74,6 +95,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",  # JWT token blacklist for logout
+    "drf_spectacular",  # OpenAPI/Swagger documentation
+    "django_filters",  # Filtering support for DRF
     "api",
     "corsheaders",
     "debug_toolbar",
@@ -124,6 +148,9 @@ DATABASES = {
         "PASSWORD": env('DATABASE_PASSWORD'),
         "HOST": env('DATABASE_HOST', default='localhost'),
         "PORT": env('DATABASE_PORT', default='5432'),
+        # Connection pooling for production performance
+        "CONN_MAX_AGE": env.int('DATABASE_CONN_MAX_AGE', default=60),
+        "CONN_HEALTH_CHECKS": True,
     }
 }
 
@@ -169,6 +196,8 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
+# Note: This is a REST API backend - no static files served.
+# Django Admin uses static files, so we keep minimal config.
 
 STATIC_URL = "static/"
 
@@ -181,5 +210,230 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
 
 # CORS Settings
-CORS_ALLOW_ALL_ORIGINS = True
+# WARNING: CORS_ALLOW_ALL_ORIGINS=True is for development only!
+# In production, set CORS_ALLOW_ALL_ORIGINS=False and list specific origins
+CORS_ALLOW_ALL_ORIGINS = env.bool('CORS_ALLOW_ALL_ORIGINS', default=True)
+CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[])
 CORS_ALLOW_CREDENTIALS = True
+
+# ===================================
+# PRODUCTION SECURITY SETTINGS
+# ===================================
+# HTTPS Settings - enable in production behind SSL
+SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=False)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# HSTS (HTTP Strict Transport Security) - set SECURE_HSTS_SECONDS=31536000 in production
+SECURE_HSTS_SECONDS = env.int('SECURE_HSTS_SECONDS', default=0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', default=False)
+SECURE_HSTS_PRELOAD = env.bool('SECURE_HSTS_PRELOAD', default=False)
+
+# Cookie Security - set to True in production (HTTPS required)
+CSRF_COOKIE_SECURE = env.bool('CSRF_COOKIE_SECURE', default=False)
+
+# Content Security
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+
+# CSRF Trusted Origins - required for cross-origin POST requests
+# Example: CSRF_TRUSTED_ORIGINS=https://museum-app.com,https://admin.museum-app.com
+CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[])
+
+# ===================================
+# REDIS Configuration
+# ===================================
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": env('REDIS_URL', default='redis://127.0.0.1:6379/1'),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "CONNECTION_POOL_KWARGS": {
+                "max_connections": 50,
+                "retry_on_timeout": True,
+            }
+        }
+    }
+}
+
+# ===================================
+# SESSION Configuration
+# ===================================
+# Development: Redis only (fast, sessions lost on Redis restart)
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "default"
+
+# Production: Redis + DB fallback (slower write, but persistent)
+# SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
+
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 7  # 7 days
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = env('SESSION_COOKIE_SECURE', default=False)  # True in production
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_SAVE_EVERY_REQUEST = False  # Only save session if modified
+
+# ===================================
+# EMAIL Configuration
+# ===================================
+# SMTP - real email sending (Gmail)
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')  # App Password iz Googlea
+
+# Development - prints to console (odkomentiraj ovu liniju da vratiš console mode)
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+DEFAULT_FROM_EMAIL = env('EMAIL_HOST_USER', default='museum@example.com')
+RECEPTION_EMAIL = env('RECEPTION_EMAIL', default='')  # Tvoj email za primanje
+
+# ===================================
+# CELERY Configuration
+# ===================================
+CELERY_BROKER_URL = env('REDIS_URL', default='redis://127.0.0.1:6379/1')
+CELERY_RESULT_BACKEND = env('REDIS_URL', default='redis://127.0.0.1:6379/1')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+
+# Celery Beat Schedule - scheduled tasks
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'shift-weekly-periods': {
+        'task': 'background_tasks.tasks.shift_weekly_periods',
+        'schedule': crontab(hour=0, minute=0, day_of_week=1),  # Monday at 00:00 - start weekly cycle
+    },
+    'generate-weekly-positions': {
+        'task': 'background_tasks.tasks.generate_weekly_positions',
+        'schedule': crontab(hour=0, minute=1, day_of_week=1),  # Monday at 00:01 - generate positions
+    },
+    'update-guard-priorities': {
+        'task': 'background_tasks.tasks.update_all_guard_priorities',
+        'schedule': crontab(hour=0, minute=5, day_of_week=1),  # Monday at 00:05 (after position generation)
+    },
+    'validate-preference-templates': {
+        'task': 'background_tasks.tasks.validate_preference_templates',
+        'schedule': crontab(hour=0, minute=10, day_of_week=1),  # Monday at 00:10 (after priorities)
+    },
+    'run-automated-assignment': {
+        'task': 'background_tasks.tasks.run_automated_assignment',
+        'schedule': crontab(hour=20, minute=0, day_of_week=3),  # Wednesday at 20:00 (default time)
+    },
+    'award-daily-completions': {
+        'task': 'background_tasks.tasks.award_daily_completions',
+        'schedule': crontab(hour=23, minute=0),  # Every day at 23:00
+    },
+    'check-penalize-insufficient-positions': {
+        'task': 'background_tasks.tasks.check_and_penalize_insufficient_positions',
+        'schedule': crontab(hour=22, minute=0, day_of_week=0),  # Sunday at 22:00 (0=Sunday)
+    },
+    'expire-swap-requests-morning': {
+        'task': 'background_tasks.tasks.expire_swap_requests',
+        'schedule': crontab(hour=11, minute=5),  # Every day at 11:05
+    },
+    'expire-swap-requests-weekday-afternoon': {
+        'task': 'background_tasks.tasks.expire_swap_requests',
+        'schedule': crontab(hour=15, minute=5, day_of_week='1-5'),  # Weekdays at 15:05
+    },
+    'expire-swap-requests-weekend-afternoon': {
+        'task': 'background_tasks.tasks.expire_swap_requests',
+        'schedule': crontab(hour=14, minute=35, day_of_week='6,0'),  # Weekend at 14:35
+    },
+}
+
+# ===================================
+# STRUCTURED LOGGING (Structlog)
+# ===================================
+import structlog
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'json': {
+            '()': 'pythonjsonlogger.jsonlogger.JsonFormatter',
+            'format': '%(asctime)s %(name)s %(levelname)s %(message)s',
+        },
+        'console': {
+            'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'console' if DEBUG else 'json',
+        },
+        'file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': 'logs/django.log',
+            'maxBytes': 10485760,  # 10MB
+            'backupCount': 5,
+            'formatter': 'json',
+        },
+    },
+    'root': {
+        'handlers': ['console', 'file'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'api': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'background_tasks': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+        'celery': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+# Structlog configuration
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.filter_by_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+    ],
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+# ===================================
+# Testing Configuration
+# ===================================
+# Detect if we're running tests
+import sys
+TESTING = 'pytest' in sys.modules or 'test' in sys.argv
+
+# Make Celery tasks run synchronously in tests (same DB transaction)
+if TESTING:
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True
+    
+    # Disable throttling in tests to prevent rate limit failures
+    # NOTE: Keep DEFAULT_THROTTLE_RATES defined so custom throttle classes can initialize,
+    # but clear DEFAULT_THROTTLE_CLASSES to prevent actual throttling
+    REST_FRAMEWORK['DEFAULT_THROTTLE_CLASSES'] = []

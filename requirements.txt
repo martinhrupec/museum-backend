@@ -1,6 +1,7 @@
 django
 djangorestframework
 djangorestframework-simplejwt
+django-filter
 PyJWT
 pyyaml
 requests
@@ -9,9 +10,31 @@ psycopg2-binary
 psycopg2
 celery
 redis
+django-redis
 python-dotenv
 django-environ
 django-debug-toolbar
 asgiref
 pytz
 sqlparse
+scipy
+drf-spectacular
+structlog
+python-json-logger
+
+# Production WSGI server
+gunicorn
+
+# Code formatting
+black
+
+# Time mocking for tests
+freezegun
+
+# Testing dependencies
+pytest>=7.4.0
+pytest-django>=4.5.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+pytest-xdist>=3.3.0
+factory-boy>=3.3.0

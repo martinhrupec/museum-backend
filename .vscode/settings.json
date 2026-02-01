@@ -1,18 +1,20 @@
 {
-    "python.defaultInterpreterPath": "venv/Scripts/python.exe",
-    "python.analysis.autoImportCompletions": true,
-    "editor.formatOnSave": true,
+    "python.defaultInterpreterPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+    "python.terminal.activateEnvironment": true,
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "terminal.integrated.shellIntegration.enabled": true,
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestArgs": [
+        "api/tests",
+        "-v"
+    ],
+    "editor.formatOnSave": false,
     "[python]": {
-        "editor.defaultFormatter": "ms-python.python"
-    },
-    "editor.codeActionsOnSave": {
-        "source.organizeImports": "explicit"
+        "editor.defaultFormatter": "ms-python.black-formatter"
     },
     "files.exclude": {
         "**/__pycache__": true,
         "**/*.pyc": true
-    },
-    "terminal.integrated.env.windows": {
-        "DJANGO_SETTINGS_MODULE": "core.settings"
-    },
+    }
 }
