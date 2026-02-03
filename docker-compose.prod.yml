@@ -15,16 +15,16 @@ services:
     image: postgres:16-alpine
     container_name: museum_postgres
     environment:
-      POSTGRES_DB: ${DATABASE_NAME:-museum_db}
-      POSTGRES_USER: ${DATABASE_USER:-museum_user}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
       - museum_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-museum_user} -d ${DATABASE_NAME:-museum_db}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${DATABASE_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -53,7 +53,7 @@ services:
       sh -c "
         python manage.py migrate --noinput &&
         python manage.py create_default_groups &&
-        gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120 --access-logfile - --error-logfile -
+        gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120 --access-logfile - --error-logfile -
       "
     volumes:
       - .:/app
