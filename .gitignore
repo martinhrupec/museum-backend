@@ -11,7 +11,7 @@ deployment/
 
 # Docker
 backups/
-nginx/
+nginx/ssl/
 
 # IDE
 .vscode/
