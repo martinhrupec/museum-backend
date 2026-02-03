@@ -27,7 +27,11 @@ COPY . .
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Create logs directory and set ownership
+<<<<<<< HEAD
 RUN mkdir -p logs && chown -R appuser:appuser /app
+=======
+RUN mkdir -p logs && chown -R appuser /app
+>>>>>>> 4039fc5c4d4b143665f50bdac3ab72d1175cbac0
 
 # Switch to non-root user
 USER appuser
