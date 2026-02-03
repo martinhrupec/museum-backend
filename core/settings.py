@@ -94,10 +94,12 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",  # PostgreSQL specific features (ArrayField, etc.)
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",  # JWT token blacklist for logout
     "drf_spectacular",  # OpenAPI/Swagger documentation
     "django_filters",  # Filtering support for DRF
+    "django_celery_beat",  # Celery Beat scheduler
     "api",
     "corsheaders",
     "debug_toolbar",

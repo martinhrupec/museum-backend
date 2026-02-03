@@ -1,4 +1,4 @@
-# 🚀 Docker Deployment Guide - KOMPLETAN VODIČ
+# Docker Deployment Guide - KOMPLETAN VODIČ
 
 ## Sadržaj
 1. [Struktura kontejnera](#struktura-kontejnera)
@@ -43,7 +43,17 @@
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install -y docker.io docker-compose-plugin
+# sudo apt install -y docker.io docker-compose-plugin # std repoz. često sadrže starije verzije dockera
+
+# bolje ovo:
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+$(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Dodaj korisnika u docker grupu (da ne trebaš sudo)
 sudo usermod -aG docker $USER
@@ -61,7 +71,7 @@ sudo apt install -y git
 
 ### Firewall
 ```bash
-sudo ufw allow 22    # SSH
+sudo ufw allow 22888    # SSH
 sudo ufw allow 80    # HTTP (redirect na HTTPS)
 sudo ufw allow 443   # HTTPS
 sudo ufw enable
@@ -150,8 +160,12 @@ openssl rand -base64 32
 
 ### 3. SSL Certifikati (Let's Encrypt)
 ```bash
-# Kreiraj folder
+# Kreiraj foldere
 mkdir -p nginx/ssl
+mkdir -p logs
+
+# Postavi permissije za logs (važno za non-root user u kontejneru!)
+chmod -R 777 logs
 
 # Kopiraj certifikate (zamijeni tvoja-domena.duckdns.org)
 sudo cp /etc/letsencrypt/live/tvoja-domena.duckdns.org/fullchain.pem nginx/ssl/
@@ -204,41 +218,23 @@ Unesi:
 
 ### Kreiraj default grupe i permissione
 ```bash
-docker compose -f docker-compose.prod.yml exec web python manage.py shell
+# Ova komanda automatski kreira "Museum Admin" grupu sa svim permissionima
+docker compose -f docker-compose.prod.yml exec web python manage.py create_default_groups
 ```
 
-U shell-u:
-```python
-from django.contrib.auth.models import Group, Permission
-from django.contrib.contenttypes.models import ContentType
-from api.models import Guard, Position, Exhibition, User
+**Što ova komanda radi:**
+- Kreira "Museum Admin" Django grupu
+- Dodjeljuje joj sve API permissione (osim delete)
+- Novi admin useri se automatski dodaju u ovu grupu (via signal u `user_type.py`)
 
-# Kreiraj grupe
-admin_group, _ = Group.objects.get_or_create(name='Admin')
-manager_group, _ = Group.objects.get_or_create(name='Manager')
-guard_group, _ = Group.objects.get_or_create(name='Guard')
+**NAPOMENA:** Ne trebamo ručno kreirati grupe kroz shell - sve se radi automatski!
 
-# Admin - sve permissione
-all_permissions = Permission.objects.all()
-admin_group.permissions.set(all_permissions)
+### Kreiraj inicijalne UserType-ove (ZASTARJELO - ignorirati)
+**NAPOMENA:** UserType model je uklonjen iz koda. Sistem koristi `User.role` sa 2 vrijednosti:
+- `ROLE_ADMIN` - admin korisnici
+- `ROLE_GUARD` - čuvari
 
-# Manager - može sve osim user management
-manager_perms = Permission.objects.exclude(
-    codename__in=['add_user', 'delete_user', 'change_user']
-)
-manager_group.permissions.set(manager_perms)
-
-# Guard - samo view i vlastiti profil
-guard_perms = Permission.objects.filter(codename__startswith='view_')
-guard_group.permissions.set(guard_perms)
-
-print("Grupe kreirane!")
-print(f"Admin permissions: {admin_group.permissions.count()}")
-print(f"Manager permissions: {manager_group.permissions.count()}")  
-print(f"Guard permissions: {guard_group.permissions.count()}")
-
-exit()
-```
+Nema potrebe za dodatnim UserType tablicama.
 
 ### Postavi SystemSettings default vrijednosti
 ```bash
@@ -272,28 +268,33 @@ else:
 exit()
 ```
 
-### Kreiraj inicijalne UserType-ove (ako treba)
+**VAŽNO:** SystemSettings je singleton - uvijek koristi `pk=1` i samo jedan red u bazi.
+
+### Provjeri je li sve kreirano
 ```bash
 docker compose -f docker-compose.prod.yml exec web python manage.py shell
 ```
 
 ```python
-from api.models import UserType
+from api.models import User, SystemSettings
+from django.contrib.auth.models import Group
 
-# Definiraj tipove korisnika
-user_types = [
-    {'name': 'Čuvar', 'code': 'GUARD', 'description': 'Muzejski čuvar'},
-    {'name': 'Manager', 'code': 'MANAGER', 'description': 'Voditelj čuvara'},
-    {'name': 'Admin', 'code': 'ADMIN', 'description': 'Administrator sustava'},
-]
+# Provjeri superusere
+superusers = User.objects.filter(is_superuser=True)
+print(f"Broj superusera: {superusers.count()}")
 
-for ut in user_types:
-    obj, created = UserType.objects.get_or_create(
-        code=ut['code'],
-        defaults={'name': ut['name'], 'description': ut['description']}
-    )
-    status = "kreiran" if created else "već postoji"
-    print(f"{ut['name']}: {status}")
+# Provjeri grupe
+groups = Group.objects.all()
+print(f"\nDjango grupe: {groups.count()}")
+for group in groups:
+    print(f"  - {group.name}")
+
+# Provjeri SystemSettings
+try:
+    settings = SystemSettings.objects.get(pk=1)
+    print(f"\nSystemSettings: ✅ postoje")
+except SystemSettings.DoesNotExist:
+    print("\nSystemSettings: ❌ NE POSTOJE! Pokreni setup.")
 
 exit()
 ```
@@ -552,8 +553,17 @@ docker compose -f docker-compose.prod.yml logs web
 # Provjeri status migracija
 docker compose -f docker-compose.prod.yml exec web python manage.py showmigrations
 
-# Primijeni ručno
+# Primijeni sve migracije
 docker compose -f docker-compose.prod.yml exec web python manage.py migrate
+
+# Samo django-celery-beat migracije (ako fali)
+docker compose -f docker-compose.prod.yml exec web python manage.py migrate django_celery_beat
+```
+
+**VAŽNO:** Ako vidiš error `relation "django_celery_beat_crontabschedule" does not exist`, pokreni:
+```bash
+docker compose -f docker-compose.prod.yml exec web python manage.py migrate django_celery_beat
+docker compose -f docker-compose.prod.yml restart celery_worker celery_beat
 ```
 
 ### Celery taskovi se ne izvršavaju
@@ -599,6 +609,127 @@ docker system prune -a
 docker compose -f docker-compose.prod.yml exec web find /app/logs -name "*.log.*" -mtime +7 -delete
 ```
 
+---
+
+## Česte greške i rješenja
+
+### ❌ ERROR: relation "django_celery_beat_crontabschedule" does not exist
+
+**Uzrok:** Migracije za Celery Beat nisu pokrenute
+
+**Rješenje:**
+```bash
+docker compose -f docker-compose.prod.yml exec web python manage.py migrate django_celery_beat
+docker compose -f docker-compose.prod.yml restart celery_worker celery_beat
+```
+
+---
+
+### ⚠️ WARNING: You're running the worker with superuser privileges
+
+**Uzrok:** Celery worker radi kao root user (security risk)
+
+**Rješenje:** Rebuild kontejnera nakon što sam dodao non-root user u Dockerfile:
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+**VAŽNO:** Nakon rebuilda, moraš postaviti permissije za logs direktorij na hostu:
+```bash
+# Ili daj write permissije za sve (najbrže)
+chmod 777 logs
+
+# Ili promijeni ownership na UID/GID koji koristi appuser u kontejneru
+sudo chown -R 999:999 logs  # 999 je default UID za -r user u Dockeru
+```
+
+---
+
+### ❌ ERROR: PermissionError: [Errno 13] Permission denied: '/app/logs/django.log'
+
+**Uzrok:** Non-root user (`appuser`) u kontejneru nema permissije za pisanje u `/app/logs/` jer volume mount prepisuje permissije
+
+**Rješenje (na HOST serveru):**
+```bash
+# Opcija 1: Daj write permissije za sve (najbrže)
+chmod 777 logs
+
+# Opcija 2: Promijeni ownership na appuser UID (sigurnije)
+sudo chown -R 999:999 logs
+
+# Provjeri permissije
+ls -la logs
+
+# Restartaj kontejnere
+docker compose -f docker-compose.prod.yml restart
+```
+
+**Ako i dalje ne radi:**
+```bash
+# Obriši postojeći logs folder i prepusti Dockeru da ga kreira
+sudo rm -rf logs
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+### ⚠️ Redis WARNING: Memory overcommit must be enabled
+
+**Uzrok:** Host server nema konfiguriran memory overcommit
+
+**Rješenje (na HOST serveru, NE u kontejneru):**
+```bash
+# Temporary (do reboot-a)
+sudo sysctl vm.overcommit_memory=1
+
+# Permanent (ostaje nakon reboot-a)
+echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+---
+
+### ℹ️ Nginx ERROR: "/etc/nginx/html/index.html" is not found
+
+**Uzrok:** Botovi pokušavaju pristupiti `/`, `/favicon.ico`, `/solr/`, itd.
+
+**Rješenje:** To je normalno! Nginx sada vraća `444` (connection closed) za sve nepoznate rute. Rebuild nginx:
+```bash
+docker compose -f docker-compose.prod.yml up -d --build nginx
+```
+
+**Kako filtrirati bot errore iz logova:**
+```bash
+# Prikaži samo legitimne errore (ignoriraj bot skeniranje)
+docker compose -f docker-compose.prod.yml logs nginx 2>&1 | grep -i error | grep -v "index.html" | grep -v "favicon.ico" | grep -v "solr" | grep -v "cgi-bin"
+```
+
+---
+
+### ℹ️ Celery WARNING: CPendingDeprecationWarning (cancel_tasks_by_default)
+
+**Uzrok:** Celery najavljuje promjenu default ponašanja u budućoj verziji (task cancellation)
+
+**Rješenje:** Ovo je samo informativni warning i ne utječe na funkcionalnost. Možeš ga ignorirati ili dodati konfiguraciju u settings.py:
+
+```python
+# U core/settings.py, dodaj u CELERY konfiguraciju:
+CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
+```
+
+**Ili ignoriraj warning** - aplikacija će raditi normalno i u budućnosti će Celery automatski primijeniti novu default vrijednost.
+
+---
+
+### ℹ️ Nginx CRIT: SSL_do_handshake() failed (packet length too long)
+
+**Uzrok:** Netko pokušava HTTP request na HTTPS port (443)
+
+**Rješenje:** To je normalno! Botovi i skeneri često šalju HTTP na HTTPS portove. Ignorirati.
+
+---
+
 ### SSL certifikat istekao
 
 ```bash
@@ -633,6 +764,80 @@ docker compose -f docker-compose.prod.yml exec web python manage.py migrate
 
 # Provjeri logove
 docker compose -f docker-compose.prod.yml logs -f web
+
+docker compose -f docker-compose.prod.yml logs web 2>&1 | grep -i "error\|warning\|critical"
+```
+
+---
+
+## Provjera zdravlja servisa (Health Check)
+
+### Brza provjera svih servisa
+```bash
+# Pregled statusa svih kontejnera
+docker compose -f docker-compose.prod.yml ps
+
+# Samo imena i status (čišći prikaz)
+docker compose -f docker-compose.prod.yml ps --format "table {{.Name}}\t{{.Status}}"
+
+# JSON format (za skripte)
+docker compose -f docker-compose.prod.yml ps --format json | jq -r '.[] | "\(.Name): \(.Health)"'
+```
+
+**Što znače statusi:**
+- `Up (healthy)` - ✅ Servis radi i prošao healthcheck
+- `Up` - ✅ Servis radi (nema definiran healthcheck)
+- `Up (health: starting)` - ⏳ Healthcheck se izvršava (pričekaj 30s)
+- `Up (unhealthy)` - ❌ Servis radi, ali healthcheck ne prolazi
+- `Restarting` - ❌ Servis se stalno restartira (provjeri logove)
+- `Exit 1` - ❌ Servis nije pokrenut (provjeri logove)
+
+### Brza dijagnostika problema
+```bash
+# Ako vidiš unhealthy ili restarting:
+
+# 1. Provjeri zadnjih 50 linija logova za problematični servis
+docker compose -f docker-compose.prod.yml logs --tail=50 <service_name>
+
+# 2. Provjeri resource usage (CPU, RAM)
+docker stats --no-stream
+
+# 3. Provjeri connectivity između servisa
+docker compose -f docker-compose.prod.yml exec web python manage.py check --deploy
+```
+
+### Pojedinačne healthcheck provjere
+```bash
+# Postgres
+docker compose -f docker-compose.prod.yml exec postgres pg_isready -U museum_user -d museum_db
+
+# Redis
+docker compose -f docker-compose.prod.yml exec redis redis-cli ping
+# Očekivani output: PONG
+
+# Django (custom health endpoint)
+docker compose -f docker-compose.prod.yml exec web curl http://localhost:8000/api/health/
+# Očekivani output: {"status":"healthy","database":"ok","redis":"ok"}
+
+# Nginx (eksterno)
+curl -I https://tvoja-domena.duckdns.org/api/health/
+# Očekivani output: HTTP/2 200
+```
+
+### Ako servisi nisu zdravi
+```bash
+# Restartaj sve servise odjednom
+docker compose -f docker-compose.prod.yml restart
+
+# Restartaj pojedini servis
+docker compose -f docker-compose.prod.yml restart web
+
+# Force rebuild i restart (ako imaš nove promjene)
+docker compose -f docker-compose.prod.yml up -d --build --force-recreate
+
+# Ako ništa ne pomaže - potpuno resetiranje
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 ---
@@ -650,6 +855,7 @@ docker compose -f docker-compose.prod.yml ps               # Status
 docker compose -f docker-compose.prod.yml logs -f          # Svi
 docker compose -f docker-compose.prod.yml logs -f web      # Django
 docker compose -f docker-compose.prod.yml logs -f celery_worker  # Celery
+docker compose -f docker-compose.prod.yml logs --tail=50 web     # Zadnjih 50 linija
 
 # === DJANGO ===
 docker compose -f docker-compose.prod.yml exec web python manage.py shell
@@ -664,4 +870,5 @@ docker compose -f docker-compose.prod.yml exec -T postgres pg_dump -U museum_use
 # === DEBUG ===
 docker compose -f docker-compose.prod.yml exec web python manage.py check
 docker compose -f docker-compose.prod.yml exec web python manage.py check --deploy
+docker stats --no-stream    # Resource usage
 ```

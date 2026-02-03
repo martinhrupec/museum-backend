@@ -12,6 +12,8 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     postgresql-client \
+    libpq-dev \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -21,8 +23,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project
 COPY . .
 
-# Create logs directory
-RUN mkdir -p logs
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Create logs directory and set ownership
+RUN mkdir -p logs && chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8000

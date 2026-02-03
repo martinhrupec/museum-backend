@@ -11,6 +11,7 @@ psycopg2
 celery
 redis
 django-redis
+django-celery-beat
 python-dotenv
 django-environ
 django-debug-toolbar
