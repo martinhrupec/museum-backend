@@ -235,7 +235,7 @@ def run_automated_assignment():
     from background_tasks.assignment_algorithm import assign_positions_automatically
     from background_tasks.minimum_calculator import calculate_and_update_minimum
     from background_tasks.tasks import calculate_availability_caps
-    from api.api_models.calculation import Position
+    from api.api_models import Position
     
     settings = SystemSettings.get_active()
     
