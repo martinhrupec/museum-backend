@@ -682,8 +682,34 @@ def send_report_email(report_id):
     Args:
         report_id: ID of the Report object to send email about
     """
+    import traceback
+    
+    logger.info(f"[send_report_email] Task started for report_id={report_id}")
+    
     try:
+        # Check email configuration
+        logger.info(f"[send_report_email] Email config check:")
+        logger.info(f"  - EMAIL_BACKEND: {settings.EMAIL_BACKEND}")
+        logger.info(f"  - EMAIL_HOST: {settings.EMAIL_HOST}")
+        logger.info(f"  - EMAIL_PORT: {settings.EMAIL_PORT}")
+        logger.info(f"  - EMAIL_USE_TLS: {settings.EMAIL_USE_TLS}")
+        logger.info(f"  - EMAIL_HOST_USER: {settings.EMAIL_HOST_USER or 'NOT SET'}")
+        logger.info(f"  - EMAIL_HOST_PASSWORD: {'SET' if settings.EMAIL_HOST_PASSWORD else 'NOT SET'}")
+        logger.info(f"  - DEFAULT_FROM_EMAIL: {settings.DEFAULT_FROM_EMAIL}")
+        logger.info(f"  - RECEPTION_EMAIL: {settings.RECEPTION_EMAIL or 'NOT SET'}")
+        
+        # Validate configuration
+        if not settings.EMAIL_HOST_USER:
+            raise ValueError("EMAIL_HOST_USER is not configured in settings")
+        if not settings.EMAIL_HOST_PASSWORD:
+            raise ValueError("EMAIL_HOST_PASSWORD is not configured in settings")
+        if not settings.RECEPTION_EMAIL:
+            raise ValueError("RECEPTION_EMAIL is not configured in settings")
+        
+        # Fetch report
+        logger.info(f"[send_report_email] Fetching report from database...")
         report = Report.objects.select_related('guard__user', 'position__exhibition').get(id=report_id)
+        logger.info(f"[send_report_email] Report found: guard={report.guard.user.username}, position={report.position}")
         
         subject = f"Prijava problema - {report.guard.user.get_full_name() or report.guard.user.username}"
         message = f"""
@@ -699,13 +725,10 @@ Lijep pozdrav,
 {report.guard.user.get_full_name() or report.guard.user.username}, {report.created_at.strftime('%d.%m.%Y %H:%M')}
         """
         
-        logger.info(f"Sending email: TO={settings.RECEPTION_EMAIL}, FROM={settings.DEFAULT_FROM_EMAIL}, SUBJECT={subject}")
-        print(f"[DEBUG] Sending email: TO={settings.RECEPTION_EMAIL}, FROM={settings.DEFAULT_FROM_EMAIL}")
-        print(f"[DEBUG] Message preview: {message[:100]}...")
-        
-        from django.core.mail import get_connection
-        connection = get_connection()
-        print(f"[DEBUG] Email connection: {connection.__class__.__name__}")
+        logger.info(f"[send_report_email] Attempting to send email...")
+        logger.info(f"  - Subject: {subject}")
+        logger.info(f"  - From: {settings.DEFAULT_FROM_EMAIL}")
+        logger.info(f"  - To: {settings.RECEPTION_EMAIL}")
         
         result = send_mail(
             subject,
@@ -715,16 +738,19 @@ Lijep pozdrav,
             fail_silently=False,
         )
         
-        print(f"[DEBUG] send_mail result: {result}")
-        logger.info(f"Report email sent successfully for report #{report_id}, send_mail returned: {result}")
+        logger.info(f"[send_report_email] SUCCESS! Email sent for report #{report_id}, send_mail returned: {result}")
         return result
         
     except Report.DoesNotExist:
-        logger.error(f"Report #{report_id} not found, cannot send email")
+        error_msg = f"Report #{report_id} not found in database"
+        logger.error(f"[send_report_email] ERROR: {error_msg}")
+        logger.error(f"[send_report_email] Traceback:\n{traceback.format_exc()}")
         raise
     except Exception as e:
-        logger.error(f"Failed to send report email for report #{report_id}: {e}")
-        raise  # Re-raise to see actual error
+        error_msg = f"Failed to send report email for report #{report_id}: {type(e).__name__}: {str(e)}"
+        logger.error(f"[send_report_email] ERROR: {error_msg}")
+        logger.error(f"[send_report_email] Full traceback:\n{traceback.format_exc()}")
+        raise  # Re-raise to mark task as FAILURE
 
 
 # ========================================

@@ -2,7 +2,7 @@
 Integration tests for JWT logout endpoint.
 
 Tests:
-- POST /api/token/logout/ - Blacklist refresh token on logout
+- POST /api/token/logout/ - st refresh token on logout
 - Validates refresh token
 - Prevents reuse after logout
 """
@@ -19,7 +19,7 @@ class TestJWTLogout:
         
         Expected:
         - 200 or 204 response
-        - Refresh token blacklisted and cannot be reused
+        - Refresh token sted and cannot be reused
         """
         # Login first
         login_response = api_client.post(
@@ -43,7 +43,7 @@ class TestJWTLogout:
         
         assert response.status_code in (200, 204, 205)
         
-        # Verify token is blacklisted - try to refresh
+        # Verify token is sted - try to refresh
         refresh_response = api_client.post(
             '/api/token/refresh/',
             {'refresh': refresh_token},
@@ -57,7 +57,7 @@ class TestJWTLogout:
         
         Expected:
         - 200 or 204 response
-        - Refresh token blacklisted
+        - Refresh token sted
         """
         # Login first
         login_response = api_client.post(
