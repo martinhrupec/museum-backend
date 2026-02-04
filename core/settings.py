@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     "django_filters",  # Filtering support for DRF
     "django_celery_beat", # Celery Beat scheduler
     "api",
+    "background_tasks",  # Celery tasks
     "corsheaders",
     "debug_toolbar",
 ]
