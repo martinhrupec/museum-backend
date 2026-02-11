@@ -2,6 +2,7 @@
 Custom JWT views with throttling.
 """
 
+from django.utils import timezone
 from rest_framework_simplejwt.views import TokenObtainPairView as BaseTokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.decorators import api_view, permission_classes
@@ -12,8 +13,22 @@ from api.throttles import LoginThrottle
 
 
 class TokenObtainPairView(BaseTokenObtainPairView):
-    """JWT token obtain view with rate limiting"""
+    """JWT token obtain view with rate limiting and last_mobile_login tracking"""
     throttle_classes = [LoginThrottle]
+    
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        
+        # Update last_mobile_login on successful JWT login
+        if response.status_code == 200:
+            from api.models import User
+            username = request.data.get('username')
+            if username:
+                User.objects.filter(username=username).update(
+                    last_mobile_login=timezone.now()
+                )
+        
+        return response
 
 
 @api_view(['POST'])

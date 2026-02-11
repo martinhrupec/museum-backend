@@ -42,9 +42,9 @@ class UserDetailSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
-            'role', 'is_active', 'date_joined', 'last_login', 'guard_profile'
+            'role', 'is_active', 'date_joined', 'last_login', 'last_mobile_login', 'guard_profile'
         ]
-        read_only_fields = ['id', 'username', 'date_joined', 'last_login', 'full_name', 'guard_profile']
+        read_only_fields = ['id', 'username', 'date_joined', 'last_login', 'last_mobile_login', 'full_name', 'guard_profile']
     
     def get_full_name(self, obj):
         full_name = f"{obj.first_name} {obj.last_name}".strip()
@@ -72,9 +72,9 @@ class UserAdminSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'is_active', 'is_staff', 'is_superuser', 'date_joined', 
-            'last_login', 'updated_at', 'guard_profile', 'password'
+            'last_login', 'last_mobile_login', 'updated_at', 'guard_profile', 'password'
         ]
-        read_only_fields = ['id', 'date_joined', 'last_login', 'updated_at', 'full_name', 'guard_profile']
+        read_only_fields = ['id', 'date_joined', 'last_login', 'last_mobile_login', 'updated_at', 'full_name', 'guard_profile']
         extra_kwargs = {
             'password': {
                 'write_only': True,
@@ -690,6 +690,10 @@ class SystemSettingsSerializer(serializers.ModelSerializer):
     manual_assignment_time = serializers.TimeField(read_only=True)
     manual_assignment_end_day = serializers.IntegerField(read_only=True, allow_null=True)
     manual_assignment_end_time = serializers.TimeField(read_only=True, allow_null=True)
+    grace_period_start_day = serializers.IntegerField(read_only=True)
+    grace_period_start_time = serializers.TimeField(read_only=True)
+    grace_period_end_day = serializers.IntegerField(read_only=True)
+    grace_period_end_time = serializers.TimeField(read_only=True)
     timing_windows = serializers.SerializerMethodField()
     
     class Meta:
@@ -705,6 +709,8 @@ class SystemSettingsSerializer(serializers.ModelSerializer):
             'config_end_day', 'config_end_time',
             'manual_assignment_day', 'manual_assignment_time',
             'manual_assignment_end_day', 'manual_assignment_end_time',
+            'grace_period_start_day', 'grace_period_start_time',
+            'grace_period_end_day', 'grace_period_end_time',
             'timing_windows',
             # Point system
             'points_life_weeks',

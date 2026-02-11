@@ -41,7 +41,14 @@ class User(AbstractUser):
         default=ROLE_GUARD,
     )
     updated_at = models.DateTimeField(auto_now=True)
+    last_mobile_login = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='last mobile login',
+        help_text="Last login via mobile app (JWT authentication)"
+    )
     # AbstractUser already provides: is_active, date_joined (use instead of created_at)
+    # Note: AbstractUser's last_login tracks web/session login
     
     # Don't override 'objects' - AbstractUser provides the correct UserManager
     # active_users is a secondary manager for convenience

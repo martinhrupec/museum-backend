@@ -351,6 +351,34 @@ class SystemSettings(models.Model):
         return assignment_dt + timedelta(hours=2)
 
     @property
+    def grace_period_start_day(self):
+        """Grace period starts same as manual assignment (1h after automated assignment)"""
+        return self.manual_assignment_day
+    
+    @property
+    def grace_period_start_time(self):
+        """Grace period starts same as manual assignment (1h after automated assignment)"""
+        return self.manual_assignment_time
+    
+    @property
+    def grace_period_end_day(self):
+        """Grace period ends 2 hours after automated assignment"""
+        reference = self._reference_assignment_datetime()
+        if reference is None:
+            return 0
+        grace_end_dt = reference + timedelta(hours=2)
+        return grace_end_dt.weekday()
+    
+    @property
+    def grace_period_end_time(self):
+        """Grace period ends 2 hours after automated assignment"""
+        reference = self._reference_assignment_datetime()
+        if reference is None:
+            return time_module(0, 0)
+        grace_end_dt = reference + timedelta(hours=2)
+        return grace_end_dt.time()
+
+    @property
     def timing_windows(self):
         """Expose derived timing windows as cycle-relative day/time payloads."""
 
@@ -375,6 +403,10 @@ class SystemSettings(models.Model):
             'manual_assignment': {
                 'start': build_payload(self.manual_assignment_day, self.manual_assignment_time),
                 'end': build_payload(self.manual_assignment_end_day, self.manual_assignment_end_time),
+            },
+            'grace_period': {
+                'start': build_payload(self.grace_period_start_day, self.grace_period_start_time),
+                'end': build_payload(self.grace_period_end_day, self.grace_period_end_time),
             },
         }
     
