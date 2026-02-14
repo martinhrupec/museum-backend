@@ -228,7 +228,16 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             period = position.get_period(settings)
             if period is None:
                 return Response(
-                    {'error': 'Position is not part of current or next week scheduling window.'},
+                    {
+                        'error': 'Position is not part of current or next week scheduling window.',
+                        'debug_info': {
+                            'position_date': str(position.date),
+                            'this_week_start': str(settings.this_week_start) if settings.this_week_start else None,
+                            'this_week_end': str(settings.this_week_end) if settings.this_week_end else None,
+                            'next_week_start': str(settings.next_week_start) if settings.next_week_start else None,
+                            'next_week_end': str(settings.next_week_end) if settings.next_week_end else None,
+                        }
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
             start_dt = position.get_start_datetime()
@@ -353,7 +362,16 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         period = position.get_period(settings)
         if period is None:
             return Response(
-                {'error': 'Position is not part of current or next week scheduling window.'},
+                {
+                    'error': 'Position is not part of current or next week scheduling window.',
+                    'debug_info': {
+                        'position_date': str(position.date),
+                        'this_week_start': str(settings.this_week_start) if settings.this_week_start else None,
+                        'this_week_end': str(settings.this_week_end) if settings.this_week_end else None,
+                        'next_week_start': str(settings.next_week_start) if settings.next_week_start else None,
+                        'next_week_end': str(settings.next_week_end) if settings.next_week_end else None,
+                    }
+                },
                 status=status.HTTP_400_BAD_REQUEST
             )
         start_dt = position.get_start_datetime()
