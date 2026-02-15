@@ -14,6 +14,7 @@ from .point_viewset import PointViewSet
 from .admin_notification_viewset import AdminNotificationViewSet
 from .report_viewset import ReportViewSet
 from .system_settings_viewset import SystemSettingsViewSet
+from .guard_work_period_viewset import GuardWorkPeriodViewSet
 from .guard_exhibition_preference_viewset import GuardExhibitionPreferenceViewSet
 from .guard_day_preference_viewset import GuardDayPreferenceViewSet
 from .position_swap_request_viewset import PositionSwapRequestViewSet
@@ -35,6 +36,7 @@ __all__ = [
     'AdminNotificationViewSet',
     'ReportViewSet',
     'SystemSettingsViewSet',
+    'GuardWorkPeriodViewSet',
     'GuardExhibitionPreferenceViewSet',
     'GuardDayPreferenceViewSet',
     'PositionSwapRequestViewSet',
