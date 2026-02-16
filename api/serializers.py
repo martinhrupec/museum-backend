@@ -163,8 +163,8 @@ class GuardBasicSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Guard
-        fields = ['id', 'username', 'full_name', 'is_active', 'priority_number', 'availability']
-        read_only_fields = ['id', 'username', 'full_name', 'is_active', 'priority_number', 'availability']
+        fields = ['id', 'username', 'full_name', 'is_active', 'priority_number', 'availability', 'availability_updated_at']
+        read_only_fields = ['id', 'username', 'full_name', 'is_active', 'priority_number', 'availability', 'availability_updated_at']
     
     def get_full_name(self, obj):
         full_name = f"{obj.user.first_name} {obj.user.last_name}".strip()
@@ -183,10 +183,10 @@ class GuardDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Guard
         fields = [
-            'id', 'user', 'priority_number', 'availability', 
+            'id', 'user', 'priority_number', 'availability', 'availability_updated_at',
             'total_points', 'recent_positions_count'
         ]
-        read_only_fields = ['id', 'user', 'priority_number', 'total_points', 'recent_positions_count']
+        read_only_fields = ['id', 'user', 'priority_number', 'availability_updated_at', 'total_points', 'recent_positions_count']
     
     def get_total_points(self, obj):
         """Calculate total points for this guard"""
@@ -221,10 +221,10 @@ class GuardAdminSerializer(serializers.ModelSerializer):
     class Meta:
         model = Guard
         fields = [
-            'id', 'user', 'priority_number', 'availability',
+            'id', 'user', 'priority_number', 'availability', 'availability_updated_at',
             'total_points', 'position_stats'
         ]
-        read_only_fields = ['id', 'user', 'priority_number', 'availability', 'total_points', 'position_stats']
+        read_only_fields = ['id', 'user', 'priority_number', 'availability', 'availability_updated_at', 'total_points', 'position_stats']
     
     def get_total_points(self, obj):
         from django.db import models
