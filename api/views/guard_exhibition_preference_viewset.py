@@ -42,7 +42,7 @@ class GuardExhibitionPreferenceViewSet(AuditLogMixin, viewsets.ReadOnlyModelView
     def get_queryset(self):
         """Filter queryset based on user role"""
         if self.request.user.role == User.ROLE_ADMIN:
-            return GuardExhibitionPreference.objects.all().select_related('guard__user', 'exhibition')
+            return GuardExhibitionPreference.objects.all().select_related('guard__user')
         else:
             # Guards see only their own preferences
-            return GuardExhibitionPreference.objects.filter(guard__user=self.request.user).select_related('guard__user', 'exhibition')
+            return GuardExhibitionPreference.objects.filter(guard__user=self.request.user).select_related('guard__user')
