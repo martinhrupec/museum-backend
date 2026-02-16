@@ -163,8 +163,8 @@ class GuardBasicSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Guard
-        fields = ['id', 'username', 'full_name', 'is_active', 'priority_number']
-        read_only_fields = ['id', 'username', 'full_name', 'is_active', 'priority_number']
+        fields = ['id', 'username', 'full_name', 'is_active', 'priority_number', 'availability']
+        read_only_fields = ['id', 'username', 'full_name', 'is_active', 'priority_number', 'availability']
     
     def get_full_name(self, obj):
         full_name = f"{obj.user.first_name} {obj.user.last_name}".strip()
