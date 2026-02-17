@@ -5,6 +5,7 @@ Handles checking if guards are eligible to accept swap requests
 and determining which positions they can offer in return.
 """
 import structlog
+from datetime import timedelta
 from django.db.models import Q
 from django.utils import timezone
 
@@ -13,6 +14,19 @@ from api.api_models.schedule import Position, PositionHistory
 from api.api_models.system_settings import SystemSettings
 
 logger = structlog.get_logger(__name__)
+
+
+def _get_week_start_from_date(date):
+    """
+    Calculate Monday (week start) from any date.
+    
+    Args:
+        date: Date object
+    
+    Returns:
+        date: Monday of the week containing the input date
+    """
+    return date - timedelta(days=date.weekday())
 
 
 def guard_has_work_periods(guard):
@@ -33,6 +47,7 @@ def get_work_period_for_position(guard, position):
     Get guard's work period that covers the given position.
     
     Checks both specific week and template periods.
+    Uses the week_start (Monday) of the position's date for lookup.
     
     Args:
         guard: Guard instance
@@ -44,10 +59,13 @@ def get_work_period_for_position(guard, position):
     day_of_week = position.date.weekday()
     shift_type = get_shift_type_for_position(position)
     
-    # Try specific week first
+    # Calculate week_start (Monday) from position date
+    week_start = _get_week_start_from_date(position.date)
+    
+    # Try specific week first (using properly calculated week_start)
     specific_wp = GuardWorkPeriod.objects.filter(
         guard=guard,
-        next_week_start=position.date,  # Assumes position.date is within the week
+        next_week_start=week_start,
         day_of_week=day_of_week,
         shift_type=shift_type,
         is_template=False
