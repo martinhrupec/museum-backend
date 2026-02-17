@@ -29,17 +29,32 @@ def _get_week_start_from_date(date):
     return date - timedelta(days=date.weekday())
 
 
-def guard_has_work_periods(guard):
+def guard_has_work_periods(guard, position=None):
     """
-    Check if guard has any work periods (template or specific week).
+    Check if guard has work periods configured.
+    
+    If position is provided, checks if guard has work periods for the specific
+    week of that position. This is important because guards submit availability
+    each week, and work periods are stored with next_week_start pointing to
+    the week they apply to.
     
     Args:
         guard: Guard instance
+        position: Optional Position instance to check work periods for specific week
     
     Returns:
-        bool: True if guard has work periods configured
+        bool: True if guard has work periods configured (for the relevant week if position provided)
     """
-    return GuardWorkPeriod.objects.filter(guard=guard).exists()
+    if position is None:
+        # Generic check - any work periods
+        return GuardWorkPeriod.objects.filter(guard=guard).exists()
+    
+    # Check for work periods in the specific week of the position
+    week_start = _get_week_start_from_date(position.date)
+    return GuardWorkPeriod.objects.filter(
+        guard=guard,
+        next_week_start=week_start
+    ).exists()
 
 
 def get_work_period_for_position(guard, position):
@@ -170,11 +185,11 @@ def can_guard_take_position(guard, position):
     Returns:
         bool: True if guard can work this position
     """
-    # Must have work periods configured
-    if not guard_has_work_periods(guard):
+    # Must have work periods configured for this position's week
+    if not guard_has_work_periods(guard, position):
         return False
     
-    # Must have work period covering this position
+    # Must have work period covering this position (specific day/shift)
     work_period = get_work_period_for_position(guard, position)
     if not work_period:
         return False
@@ -222,12 +237,12 @@ def check_guard_eligibility_for_swap(guard, swap_request):
     
     # For special events, skip work_period checks (all guards can accept)
     if not position_wanted.is_special_event:
-        # 1. Check if guard has work_periods (only for regular exhibitions)
-        if not guard_has_work_periods(guard):
+        # 1. Check if guard has work_periods for the position's week (only for regular exhibitions)
+        if not guard_has_work_periods(guard, position_wanted):
             return {
                 'is_eligible': False,
                 'positions_can_offer': [],
-                'reason': 'Guard has no work periods configured'
+                'reason': 'Guard has no work periods configured for this week'
             }
         
         # 2. Check if guard has work_period covering position_wanted (only for regular exhibitions)
@@ -254,8 +269,14 @@ def check_guard_eligibility_for_swap(guard, swap_request):
     
     guard_assigned_positions = get_guard_assigned_positions_in_week(guard, week_start, week_end)
     
+    # Filter out positions that have already started - cannot offer a position that's in progress
+    now = timezone.now()
+    
     positions_can_offer = []
     for pos in guard_assigned_positions:
+        # Skip positions that have already started
+        if pos.get_start_datetime() <= now:
+            continue
         if can_guard_take_position(requesting_guard, pos):
             positions_can_offer.append(pos)
     
