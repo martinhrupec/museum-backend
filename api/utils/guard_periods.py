@@ -13,17 +13,17 @@ logger = structlog.get_logger(__name__)
 
 def get_guard_work_periods(guard, next_week_start, next_week_end):
     """
-    Get guard's work periods for next week with fallback logic.
+    Get guard's work periods for a specific week.
     
+    With the new schema, ALL work periods have next_week_start set (even templates).
     Priority:
-    1. Specific week work periods (next_week_start match)
-    2. Template work periods (is_template=True)
-    3. Fallback: ALL available shifts (if availability set but no periods)
+    1. Periods matching next_week_start (template or non-template)
+    2. Fallback: ALL available shifts (if availability set but no periods)
     
     Args:
         guard: Guard instance
-        next_week_start: Date of next week start
-        next_week_end: Date of next week end
+        next_week_start: Date of week start
+        next_week_end: Date of week end
     
     Returns:
         list: List of (day_of_week, shift_type) tuples
@@ -34,30 +34,19 @@ def get_guard_work_periods(guard, next_week_start, next_week_end):
         logger.debug(f"Guard {guard.user.username} has no availability - returning empty periods")
         return []
     
-    # Try specific week periods
-    specific_periods = GuardWorkPeriod.objects.filter(
+    # Find periods for this specific week (both templates and non-templates now have next_week_start)
+    week_periods = GuardWorkPeriod.objects.filter(
         guard=guard,
-        next_week_start=next_week_start,
-        is_template=False
+        next_week_start=next_week_start
     )
     
-    if specific_periods.exists():
-        periods = [(wp.day_of_week, wp.shift_type) for wp in specific_periods]
-        logger.debug(f"Guard {guard.user.username}: using specific periods ({len(periods)})")
+    if week_periods.exists():
+        periods = [(wp.day_of_week, wp.shift_type) for wp in week_periods]
+        is_template = week_periods.first().is_template
+        logger.debug(f"Guard {guard.user.username}: using week periods ({len(periods)}, template={is_template})")
         return periods
     
-    # Try template periods
-    template_periods = GuardWorkPeriod.objects.filter(
-        guard=guard,
-        is_template=True
-    )
-    
-    if template_periods.exists():
-        periods = [(wp.day_of_week, wp.shift_type) for wp in template_periods]
-        logger.debug(f"Guard {guard.user.username}: using template periods ({len(periods)})")
-        return periods
-    
-    # Fallback: Generate all available shifts from next_week positions
+    # Fallback: Generate all available shifts from positions in that week
     logger.debug(f"Guard {guard.user.username}: using fallback - all available shifts")
     
     settings = SystemSettings.get_active()

@@ -37,19 +37,12 @@ def get_positions_for_guard_periods(guard, next_week_start=None):
     
     next_week_end = settings.next_week_end
     
-    # Get guard's work periods (prefer specific week over template)
+    # Get guard's work periods for this specific week
+    # With new schema, all periods have next_week_start set (even templates)
     work_periods = GuardWorkPeriod.objects.filter(
         guard=guard,
-        next_week_start=next_week_start,
-        is_template=False
+        next_week_start=next_week_start
     )
-    
-    if not work_periods.exists():
-        # Fall back to template if no specific periods for this week
-        work_periods = GuardWorkPeriod.objects.filter(
-            guard=guard,
-            is_template=True
-        )
     
     if not work_periods.exists():
         # No periods set - default behavior: guard can work ALL positions
@@ -128,22 +121,14 @@ def get_guard_work_periods_summary(guard, next_week_start=None):
     if next_week_start is None:
         next_week_start = settings.next_week_start
     
-    # Get work periods
-    specific_periods = GuardWorkPeriod.objects.filter(
+    # Get work periods for this week (templates now also have next_week_start)
+    periods = GuardWorkPeriod.objects.filter(
         guard=guard,
-        next_week_start=next_week_start,
-        is_template=False
+        next_week_start=next_week_start
     )
     
-    if specific_periods.exists():
-        periods = specific_periods
-        is_using_template = False
-    else:
-        periods = GuardWorkPeriod.objects.filter(
-            guard=guard,
-            is_template=True
-        )
-        is_using_template = True
+    # Check if any are templates
+    is_using_template = periods.filter(is_template=True).exists()
     
     # Get matching positions
     matching_positions = get_positions_for_guard_periods(guard, next_week_start)

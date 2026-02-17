@@ -403,39 +403,81 @@ def validate_preference_templates():
             )
     
     # Validate Work Period Templates
-    work_period_templates = GuardWorkPeriod.objects.filter(is_template=True)
+    # After the schema change, ALL work periods have next_week_start set.
+    # Templates from last cycle have next_week_start=settings.this_week_start
+    # (because when they were set, that was next_week).
+    # Templates with older next_week_start are from even earlier and should be invalidated.
     
-    # Group by guard to process all templates per guard at once
     from collections import defaultdict
+    
+    # Find templates that need validation (from previous configuration cycles)
+    # These are templates with next_week_start < settings.next_week_start
+    work_period_templates = GuardWorkPeriod.objects.filter(
+        is_template=True,
+        next_week_start__lt=settings.next_week_start  # From previous cycles
+    )
+    
+    # Also handle any templates with NULL next_week_start (legacy data)
+    legacy_templates = GuardWorkPeriod.objects.filter(
+        is_template=True,
+        next_week_start__isnull=True
+    )
+    
+    # Group by guard
     templates_by_guard = defaultdict(list)
     for wp in work_period_templates:
         templates_by_guard[wp.guard].append(wp)
     
+    carried_forward_count = 0
+    
     for guard, work_periods in templates_by_guard.items():
-        # Get historical work period set from created_at week
-        # Use first work period's created_at (all should be from same batch)
+        # Get the next_week_start from the template (what week it was created for)
         first_wp = work_periods[0]
-        week_start, week_end = _get_week_from_datetime(first_wp.created_at)
-        week_start = week_start + timedelta(days=7)
-        week_end = week_end + timedelta(days=7)
-        historical_periods = _get_available_work_periods_for_week(week_start, week_end)
+        template_week_start = first_wp.next_week_start
+        template_week_end = template_week_start + timedelta(days=6)
         
-        # Get current next_week work period set
+        # Get available periods for the template's week (historical)
+        historical_periods = _get_available_work_periods_for_week(
+            template_week_start,
+            template_week_end
+        )
+        
+        # Get available periods for next_week (current)
         current_periods = _get_available_work_periods_for_week(
             settings.next_week_start,
             settings.next_week_end
         )
         
         # Compare sets
-        if historical_periods != current_periods:
-            # Invalidate all templates for this guard - set next_week_start
+        if historical_periods == current_periods:
+            # Conditions match - carry forward the template
+            # 1. Create new copies for next_week with is_template=True
+            for wp in work_periods:
+                GuardWorkPeriod.objects.create(
+                    guard=guard,
+                    day_of_week=wp.day_of_week,
+                    shift_type=wp.shift_type,
+                    is_template=True,
+                    next_week_start=settings.next_week_start
+                )
+            
+            # 2. Set old templates to is_template=False (they keep their original next_week_start)
             for wp in work_periods:
                 wp.is_template = False
-                wp.next_week_start = settings.next_week_start
                 wp.save()
             
-            # Notify guard (system-generated, unicast notification)
-            # Expires at end of configuration period - only relevant during configuration window
+            carried_forward_count += 1
+            logger.info(
+                f"Carried forward work period template for {guard.user.username}: "
+                f"from week {template_week_start} to {settings.next_week_start}"
+            )
+        else:
+            # Conditions don't match - invalidate template (no copy for next_week)
+            for wp in work_periods:
+                wp.is_template = False
+                wp.save()
+            
+            # Notify guard
             expires_at = settings.config_end_datetime
             if expires_at is None:
                 expires_at = timezone.now() + timedelta(days=3)
@@ -457,11 +499,40 @@ def validate_preference_templates():
                 f"historical={sorted(historical_periods)}, current={sorted(current_periods)}"
             )
     
+    # Handle legacy templates (NULL next_week_start) - just invalidate them
+    legacy_templates_by_guard = defaultdict(list)
+    for wp in legacy_templates:
+        legacy_templates_by_guard[wp.guard].append(wp)
+    
+    for guard, work_periods in legacy_templates_by_guard.items():
+        for wp in work_periods:
+            wp.is_template = False
+            wp.next_week_start = settings.this_week_start  # Assign to current week
+            wp.save()
+        
+        invalidated_work_period_count += 1
+        logger.info(
+            f"Invalidated legacy work period template for {guard.user.username} "
+            f"(had NULL next_week_start)"
+        )
+    
+    # Cleanup: Delete work periods older than 3 weeks
+    three_weeks_ago = settings.this_week_start - timedelta(weeks=3)
+    deleted_old_periods = GuardWorkPeriod.objects.filter(
+        next_week_start__lt=three_weeks_ago,
+        is_template=False  # Only delete non-templates (templates should have been processed above)
+    ).delete()[0]
+    
+    if deleted_old_periods > 0:
+        logger.info(f"Cleaned up {deleted_old_periods} work periods older than {three_weeks_ago}")
+    
     result = (
         f"Validated preference templates: "
         f"invalidated {invalidated_exhibition_count} exhibition templates, "
         f"{invalidated_day_count} day templates, "
-        f"{invalidated_work_period_count} work period templates"
+        f"{invalidated_work_period_count} work period templates, "
+        f"carried forward {carried_forward_count} work period templates, "
+        f"cleaned up {deleted_old_periods} old periods"
     )
     logger.info(result)
     return result

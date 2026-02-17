@@ -46,7 +46,7 @@ def get_work_period_for_position(guard, position):
     """
     Get guard's work period that covers the given position.
     
-    Checks both specific week and template periods.
+    With the new schema, ALL work periods have next_week_start set (even templates).
     Uses the week_start (Monday) of the position's date for lookup.
     
     Args:
@@ -62,27 +62,15 @@ def get_work_period_for_position(guard, position):
     # Calculate week_start (Monday) from position date
     week_start = _get_week_start_from_date(position.date)
     
-    # Try specific week first (using properly calculated week_start)
-    specific_wp = GuardWorkPeriod.objects.filter(
+    # Find work period for this week (both templates and non-templates now have next_week_start)
+    work_period = GuardWorkPeriod.objects.filter(
         guard=guard,
         next_week_start=week_start,
         day_of_week=day_of_week,
-        shift_type=shift_type,
-        is_template=False
+        shift_type=shift_type
     ).first()
     
-    if specific_wp:
-        return specific_wp
-    
-    # Try template
-    template_wp = GuardWorkPeriod.objects.filter(
-        guard=guard,
-        day_of_week=day_of_week,
-        shift_type=shift_type,
-        is_template=True
-    ).first()
-    
-    return template_wp
+    return work_period
 
 
 def get_shift_type_for_position(position):

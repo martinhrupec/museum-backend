@@ -3,7 +3,6 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db.models import Q
 import structlog
 from ..api_models import (
     User, Guard, NonWorkingDay, SystemSettings, GuardWorkPeriod,
@@ -152,11 +151,11 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
-        # Get guard's work periods (template or specific week)
+        # Get guard's work periods for next week
+        # With new schema, all periods have next_week_start set (even templates)
         guard_work_periods = GuardWorkPeriod.objects.filter(
-            guard=guard
-        ).filter(
-            Q(is_template=True) | Q(next_week_start=settings.next_week_start)
+            guard=guard,
+            next_week_start=settings.next_week_start
         )
         
         if not guard_work_periods.exists():
@@ -209,11 +208,11 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
-        # Get guard's work periods (template or specific week)
+        # Get guard's work periods for next week
+        # With new schema, all periods have next_week_start set (even templates)
         guard_work_periods = GuardWorkPeriod.objects.filter(
-            guard=guard
-        ).filter(
-            Q(is_template=True) | Q(next_week_start=settings.next_week_start)
+            guard=guard,
+            next_week_start=settings.next_week_start
         )
         
         if not guard_work_periods.exists():
@@ -330,8 +329,10 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Check for template conflicts
+        # With new schema, templates have next_week_start set
         template_periods = GuardWorkPeriod.objects.filter(
             guard=guard,
+            next_week_start=settings.next_week_start,
             is_template=True
         )
         template_count = template_periods.count()
@@ -460,20 +461,15 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if window_error:
             return window_error
         
-        # Delete old periods for this guard and week (or template if saving template)
-        # IMPORTANT: When guard sets new periods, old templates no longer apply
-        # Delete ALL old template periods first (regardless of save_for_future)
-        GuardWorkPeriod.objects.filter(guard=guard, is_template=True).delete()
+        # Delete ONLY periods for this guard that have next_week_start == settings.next_week_start
+        # This allows updating periods within the same configuration cycle without affecting
+        # historical periods from previous weeks (needed for swap eligibility checks)
+        GuardWorkPeriod.objects.filter(
+            guard=guard,
+            next_week_start=settings.next_week_start
+        ).delete()
         
-        # Then delete specific week periods if setting for specific week
-        if not save_for_future:
-            GuardWorkPeriod.objects.filter(
-                guard=guard,
-                next_week_start=settings.next_week_start,
-                is_template=False
-            ).delete()
-        
-        # Create new periods
+        # Create new periods - ALL periods must have next_week_start set, even templates
         created_periods = []
         for period_data in periods_data:
             period = GuardWorkPeriod.objects.create(
@@ -481,7 +477,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 day_of_week=period_data['day_of_week'],
                 shift_type=period_data['shift_type'],
                 is_template=save_for_future,
-                next_week_start=None if save_for_future else settings.next_week_start
+                next_week_start=settings.next_week_start  # Always set, even for templates
             )
             created_periods.append(period)
         
@@ -507,7 +503,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
             guard_username=guard.user.username,
             period_count=len(created_periods),
             is_template=save_for_future,
-            week_start=str(settings.next_week_start) if not save_for_future else None,
+            week_start=str(settings.next_week_start),
             user_id=request.user.id
         )
         
@@ -515,7 +511,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         message = 'Periodi rada uspješno postavljeni'
         if save_for_future:
-            message += ' i spremljeni kao predložak za buduće tjedne.'
+            message += f' kao predložak za tjedan {settings.next_week_start} - {settings.next_week_end} i buduće tjedne.'
         else:
             message += f' za tjedan {settings.next_week_start} - {settings.next_week_end}.'
         
@@ -601,10 +597,10 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
             })
         
         # PREREQUISITE: Guard must have work periods set (only for non-empty list)
+        # With new schema, all periods have next_week_start set (even templates)
         guard_work_periods = GuardWorkPeriod.objects.filter(
-            guard=guard
-        ).filter(
-            Q(is_template=True) | Q(next_week_start=settings.next_week_start)
+            guard=guard,
+            next_week_start=settings.next_week_start
         )
         
         if not guard_work_periods.exists():
@@ -766,10 +762,10 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
             })
         
         # PREREQUISITE: Guard must have work periods set (only for non-empty list)
+        # With new schema, all periods have next_week_start set (even templates)
         guard_work_periods = GuardWorkPeriod.objects.filter(
-            guard=guard
-        ).filter(
-            Q(is_template=True) | Q(next_week_start=settings.next_week_start)
+            guard=guard,
+            next_week_start=settings.next_week_start
         )
         
         if not guard_work_periods.exists():
