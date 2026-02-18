@@ -9,7 +9,7 @@ from decimal import Decimal
 import structlog
 
 from ..api_models import User, Guard, Position, PositionHistory, Point, AdminNotification, SystemSettings, HourlyRateHistory
-from ..serializers import PositionHistorySerializer, AssignedPositionScheduleSerializer
+from ..serializers import PositionHistorySerializer, AssignedPositionScheduleSerializer, MonthlyPositionSnapshotSerializer
 from ..throttles import AssignPositionThrottle, CancelPositionThrottle, BulkCancelThrottle
 from ..mixins import AuditLogMixin
 from ..permissions import IsAdminRole
@@ -980,4 +980,358 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
+    
+    @action(detail=False, methods=['get'], url_path='monthly-snapshot')
+    def monthly_snapshot(self, request):
+        """
+        Get monthly position snapshot with optional guard filtering.
+        Returns all positions in a month with their latest history action.
+        Includes positions without history (marked as 'empty').
+        
+        Query params:
+        - month: Required, 1-12
+        - year: Required
+        - guard_id: Optional
+          - For admins: 'all' or specific guard ID
+          - For guards: 'all' or 'me' (defaults to 'all')
+        
+        GET /api/position-history/monthly-snapshot/?year=2026&month=1&guard_id=all
+        GET /api/position-history/monthly-snapshot/?year=2026&month=1&guard_id=5
+        GET /api/position-history/monthly-snapshot/?year=2026&month=1&guard_id=me
+        """
+        # Parse query parameters
+        year_str = request.query_params.get('year')
+        month_str = request.query_params.get('month')
+        guard_filter = request.query_params.get('guard_id', 'all')
+        
+        if not year_str or not month_str:
+            return Response(
+                {'error': 'year and month parameters are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            year = int(year_str)
+            month = int(month_str)
+        except ValueError:
+            return Response(
+                {'error': 'year and month must be valid integers.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if year < 2020 or year > 2100:
+            return Response(
+                {'error': 'year must be between 2020 and 2100.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if month < 1 or month > 12:
+            return Response(
+                {'error': 'month must be between 1 and 12.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Determine date range
+        from datetime import date, timedelta
+        start_date = date(year, month, 1)
+        if month == 12:
+            end_date = date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = date(year, month + 1, 1) - timedelta(days=1)
+        
+        # Resolve guard filter
+        filter_guard = None
+        is_admin = request.user.role == User.ROLE_ADMIN
+        
+        if guard_filter == 'me':
+            if is_admin:
+                return Response(
+                    {'error': 'Admins cannot use "me" filter. Use "all" or a specific guard_id.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            try:
+                filter_guard = request.user.guard
+            except Guard.DoesNotExist:
+                return Response(
+                    {'error': 'Guard profile not found for current user.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        elif guard_filter != 'all':
+            # Specific guard_id
+            try:
+                guard_id = int(guard_filter)
+                filter_guard = Guard.objects.get(pk=guard_id)
+            except (ValueError, TypeError):
+                return Response(
+                    {'error': 'guard_id must be "all", "me", or a valid integer.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            except Guard.DoesNotExist:
+                return Response(
+                    {'error': f'Guard with id {guard_filter} not found.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
+        # Get all positions in the month
+        positions_qs = Position.objects.filter(
+            date__gte=start_date,
+            date__lte=end_date
+        ).select_related('exhibition').order_by('date', 'start_time', 'exhibition__name')
+        positions = list(positions_qs)
+        
+        if not positions:
+            return Response({
+                'month': month,
+                'year': year,
+                'period_start': start_date.isoformat(),
+                'period_end': end_date.isoformat(),
+                'filter_guard_id': filter_guard.id if filter_guard else None,
+                'positions': []
+            })
+        
+        # Fetch all histories for these positions
+        histories = (
+            PositionHistory.objects
+            .filter(position__in=positions)
+            .select_related('guard__user')
+            .order_by('position_id', '-action_time', '-id')
+        )
+        
+        # Get latest history per position
+        latest_by_position = {}
+        for history in histories:
+            if history.position_id not in latest_by_position:
+                latest_by_position[history.position_id] = history
+        
+        # Build snapshot entries
+        snapshot_entries = []
+        for position in positions:
+            latest_history = latest_by_position.get(position.id)
+            
+            if latest_history:
+                is_taken = latest_history.action in self._TAKEN_ACTIONS
+                guard = latest_history.guard if is_taken else None
+                last_action = latest_history.action
+                last_action_time = latest_history.action_time
+                position_history_id = latest_history.id
+            else:
+                is_taken = False
+                guard = None
+                last_action = self._EMPTY_LABEL
+                last_action_time = None
+                position_history_id = None
+            
+            # Apply guard filter
+            if filter_guard:
+                # When filtering by guard, include only positions where that guard is assigned
+                if guard != filter_guard:
+                    continue
+            
+            snapshot_entries.append({
+                'position': position,
+                'guard': guard,
+                'is_taken': is_taken,
+                'last_action': last_action,
+                'last_action_time': last_action_time,
+                'position_history_id': position_history_id,
+            })
+        
+        serializer = MonthlyPositionSnapshotSerializer(snapshot_entries, many=True)
+        
+        return Response({
+            'month': month,
+            'year': year,
+            'period_start': start_date.isoformat(),
+            'period_end': end_date.isoformat(),
+            'filter_guard_id': filter_guard.id if filter_guard else None,
+            'total_positions': len(snapshot_entries),
+            'positions': serializer.data
+        })
+    
+    @action(detail=False, methods=['post'], url_path='monthly-earnings-summary')
+    def monthly_earnings_summary(self, request):
+        """
+        Admin-only endpoint: Get monthly earnings summary for all guards.
+        Returns total earnings per guard with breakdown by exhibition.
+        
+        Uses same calculation logic as my_work_history:
+        - Sunday = 1.5x hourly rate
+        - Historical hourly rates are used
+        
+        POST /api/position-history/monthly-earnings-summary/
+        {
+            "month": 1,
+            "year": 2026
+        }
+        
+        Returns:
+        {
+            "month": 1,
+            "year": 2026,
+            "guards": [
+                {
+                    "guard_id": 5,
+                    "username": "john",
+                    "full_name": "John Doe",
+                    "total_hours": 40.0,
+                    "total_earnings": 320.0,
+                    "exhibitions": [
+                        {"exhibition_id": 1, "name": "Modern Art", "hours": 20.0, "earnings": 160.0},
+                        {"exhibition_id": 2, "name": "Sculpture", "hours": 20.0, "earnings": 160.0}
+                    ]
+                },
+                ...
+            ]
+        }
+        """
+        # Admin only
+        if request.user.role != User.ROLE_ADMIN:
+            return Response(
+                {'error': 'Only administrators can access monthly earnings summary.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Parse request body
+        month = request.data.get('month')
+        year = request.data.get('year')
+        
+        if not month or not year:
+            return Response(
+                {'error': 'month and year are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            month = int(month)
+            year = int(year)
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'month and year must be valid integers.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if year < 2020 or year > 2100:
+            return Response(
+                {'error': 'year must be between 2020 and 2100.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if month < 1 or month > 12:
+            return Response(
+                {'error': 'month must be between 1 and 12.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Determine date range
+        from datetime import date, timedelta
+        start_date = date(year, month, 1)
+        if month == 12:
+            end_date = date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = date(year, month + 1, 1) - timedelta(days=1)
+        
+        # Get all positions in the month with their latest "taken" history
+        positions = Position.objects.filter(
+            date__gte=start_date,
+            date__lte=end_date
+        ).select_related('exhibition').prefetch_related('position_histories__guard__user')
+        
+        # Dictionary to collect earnings by guard and exhibition
+        # Structure: {guard_id: {'guard': Guard, 'exhibitions': {exhibition_id: {'exhibition': Exhibition, 'hours': Decimal, 'earnings': Decimal}}}}
+        guard_earnings = {}
+        
+        for position in positions:
+            # Get latest history for this position
+            latest_history = position.position_histories.order_by('-action_time', '-id').first()
+            
+            if not latest_history or latest_history.action not in self._TAKEN_ACTIONS:
+                continue  # Position not assigned
+            
+            guard = latest_history.guard
+            exhibition = position.exhibition
+            
+            # Calculate earnings
+            duration_hours = position.get_duration_hours()
+            
+            position_datetime = timezone.make_aware(
+                datetime.combine(position.date, position.start_time),
+                timezone.get_current_timezone()
+            )
+            
+            base_hourly_rate = HourlyRateHistory.get_rate_for_date(position_datetime)
+            
+            # Sunday bonus: 1.5x
+            is_sunday = position.date.weekday() == 6
+            hourly_rate = base_hourly_rate * Decimal('1.5') if is_sunday else base_hourly_rate
+            
+            earnings = duration_hours * hourly_rate
+            
+            # Accumulate in dictionary
+            if guard.id not in guard_earnings:
+                guard_earnings[guard.id] = {
+                    'guard': guard,
+                    'exhibitions': {}
+                }
+            
+            if exhibition.id not in guard_earnings[guard.id]['exhibitions']:
+                guard_earnings[guard.id]['exhibitions'][exhibition.id] = {
+                    'exhibition': exhibition,
+                    'hours': Decimal('0.00'),
+                    'earnings': Decimal('0.00')
+                }
+            
+            guard_earnings[guard.id]['exhibitions'][exhibition.id]['hours'] += duration_hours
+            guard_earnings[guard.id]['exhibitions'][exhibition.id]['earnings'] += earnings
+        
+        # Build response
+        guards_summary = []
+        for guard_id, data in guard_earnings.items():
+            guard = data['guard']
+            exhibitions = data['exhibitions']
+            
+            total_hours = sum(ex['hours'] for ex in exhibitions.values())
+            total_earnings = sum(ex['earnings'] for ex in exhibitions.values())
+            
+            exhibition_details = [
+                {
+                    'exhibition_id': ex_id,
+                    'name': ex_data['exhibition'].name,
+                    'hours': float(ex_data['hours']),
+                    'earnings': float(ex_data['earnings'])
+                }
+                for ex_id, ex_data in exhibitions.items()
+            ]
+            
+            # Sort exhibitions by name
+            exhibition_details.sort(key=lambda x: x['name'])
+            
+            guards_summary.append({
+                'guard_id': guard.id,
+                'username': guard.user.username,
+                'full_name': guard.user.get_full_name(),
+                'total_hours': float(total_hours),
+                'total_earnings': float(total_earnings),
+                'exhibitions': exhibition_details
+            })
+        
+        # Sort guards by full_name
+        guards_summary.sort(key=lambda x: x['full_name'] or x['username'])
+        
+        # Calculate grand totals
+        grand_total_hours = sum(g['total_hours'] for g in guards_summary)
+        grand_total_earnings = sum(g['total_earnings'] for g in guards_summary)
+        
+        return Response({
+            'month': month,
+            'year': year,
+            'period_start': start_date.isoformat(),
+            'period_end': end_date.isoformat(),
+            'summary': {
+                'total_guards': len(guards_summary),
+                'total_hours': grand_total_hours,
+                'total_earnings': grand_total_earnings
+            },
+            'guards': guards_summary
+        })
+
 

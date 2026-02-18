@@ -540,6 +540,19 @@ class AssignedPositionScheduleSerializer(serializers.Serializer):
     last_action_time = serializers.DateTimeField(allow_null=True)
 
 
+class MonthlyPositionSnapshotSerializer(serializers.Serializer):
+    """
+    Serializer for monthly position snapshot including history ID.
+    Extends AssignedPositionScheduleSerializer with position_history_id for admin operations.
+    """
+    position = PositionBasicSerializer(read_only=True)
+    guard = GuardBasicSerializer(read_only=True, allow_null=True)
+    is_taken = serializers.BooleanField()
+    last_action = serializers.CharField()
+    last_action_time = serializers.DateTimeField(allow_null=True)
+    position_history_id = serializers.IntegerField(allow_null=True)
+
+
 # ========================================
 # POINT SERIALIZERS
 # ========================================

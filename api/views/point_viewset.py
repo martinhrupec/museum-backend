@@ -74,11 +74,11 @@ class PointViewSet(viewsets.ModelViewSet):
         guard = get_object_or_404(Guard, pk=guard_id)
         settings = SystemSettings.get_active()
         
-        explanation = f"Penalty for being late without notification"
+        explanation = f"Kazna za kašnjenje bez obavijesti"
         if position_id:
             try:
                 position = Position.objects.get(pk=position_id)
-                explanation += f" (Position: {position.exhibition.name}, {position.date})"
+                explanation += f" (Pozicija: {position.exhibition.name}, {position.date})"
             except Position.DoesNotExist:
                 pass
         if additional_notes:
