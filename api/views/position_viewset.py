@@ -113,7 +113,7 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # 2. Check if guard has work_periods for this position's week
         if not guard_has_work_periods(guard, position):
             return Response(
-                {'error': 'You must configure your work periods for this week before requesting swaps'},
+                {'error': 'Nemate konfigurirane radne periode za tjedan u kojem je pozicija.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         

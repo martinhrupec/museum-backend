@@ -59,7 +59,7 @@ def perform_position_swap(swap_request, accepting_guard, position_offered):
             PositionHistory.objects.create(
                 position=position_offered,
                 guard=requesting_guard,
-                action=PositionHistory.ACTION_SWAPPED
+                action=PositionHistory.Action.SWAPPED
             )
             logger.info(
                 f"Swap: {requesting_guard.user.username} takes {position_offered} "
@@ -70,7 +70,7 @@ def perform_position_swap(swap_request, accepting_guard, position_offered):
             PositionHistory.objects.create(
                 position=position_to_swap,
                 guard=accepting_guard,
-                action=PositionHistory.ACTION_SWAPPED
+                action=PositionHistory.Action.SWAPPED
             )
             logger.info(
                 f"Swap: {accepting_guard.user.username} takes {position_to_swap} "
@@ -137,9 +137,9 @@ def _validate_swap_still_valid(swap_request, accepting_guard, position_offered):
         return False
     
     if latest_history_swap.action not in [
-        PositionHistory.ACTION_ASSIGNED,
-        PositionHistory.ACTION_REPLACED,
-        PositionHistory.ACTION_SWAPPED
+        PositionHistory.Action.ASSIGNED,
+        PositionHistory.Action.REPLACED,
+        PositionHistory.Action.SWAPPED
     ]:
         logger.warning(f"Position {position_to_swap.id} is not in assigned state")
         return False
@@ -155,9 +155,9 @@ def _validate_swap_still_valid(swap_request, accepting_guard, position_offered):
         return False
     
     if latest_history_offered.action not in [
-        PositionHistory.ACTION_ASSIGNED,
-        PositionHistory.ACTION_REPLACED,
-        PositionHistory.ACTION_SWAPPED
+        PositionHistory.Action.ASSIGNED,
+        PositionHistory.Action.REPLACED,
+        PositionHistory.Action.SWAPPED
     ]:
         logger.warning(f"Position {position_offered.id} is not in assigned state")
         return False
