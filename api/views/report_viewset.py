@@ -24,8 +24,27 @@ class ReportViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """
         All authenticated users can see all reports.
+        
+        Query params:
+            exhibition_id: Filter by exhibition ID
+            ordering: Sort order (created_at, -created_at)
         """
-        return Report.objects.all().select_related('guard__user', 'position__exhibition')
+        queryset = Report.objects.all().select_related('guard__user', 'position__exhibition')
+        
+        # Exhibition filtering
+        exhibition_id = self.request.query_params.get('exhibition_id')
+        if exhibition_id:
+            try:
+                queryset = queryset.filter(position__exhibition_id=int(exhibition_id))
+            except ValueError:
+                pass
+        
+        # Ordering
+        ordering = self.request.query_params.get('ordering')
+        if ordering in ['created_at', '-created_at']:
+            queryset = queryset.order_by(ordering)
+        
+        return queryset
     
     def get_permissions(self):
         """Set permissions based on action"""

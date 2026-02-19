@@ -45,15 +45,26 @@ class AdminNotificationViewSet(viewsets.ModelViewSet):
     serializer_class = AdminNotificationSerializer
     
     def get_queryset(self):
-        """Filter queryset based on user role and cast type"""
+        """Filter queryset based on user role and cast type
+        
+        Query params:
+            active: Filter by active status (true: only active/non-expired, all: include expired)
+                    Default for admins is 'all', for guards always 'true'
+            ordering: Sort order (expires_at, -expires_at, created_at, -created_at)
+        """
         user = self.request.user
         
         # Base filter: only non-expired notifications
         base_filter = Q(expires_at__isnull=True) | Q(expires_at__gte=timezone.now())
         
         if user.role == User.ROLE_ADMIN:
-            # Admins see all notifications (including expired for history)
-            return AdminNotification.objects.all()
+            # Admins see all notifications by default (including expired for history)
+            # Use ?active=true to see only active ones
+            active = self.request.query_params.get('active')
+            if active == 'true':
+                queryset = AdminNotification.objects.filter(base_filter)
+            else:
+                queryset = AdminNotification.objects.all()
         else:
             # Guards see only non-expired: broadcast OR unicast to them OR multicast where they're assigned
             
@@ -92,7 +103,14 @@ class AdminNotificationViewSet(viewsets.ModelViewSet):
                 # User is not a guard, only show broadcast/unicast
                 pass
             
-            return queryset.distinct()
+            queryset = queryset.distinct()
+        
+        # Ordering
+        ordering = self.request.query_params.get('ordering')
+        if ordering in ['expires_at', '-expires_at', 'created_at', '-created_at']:
+            queryset = queryset.order_by(ordering)
+        
+        return queryset
     
     def perform_create(self, serializer):
         """Set created_by to current user when creating notification"""

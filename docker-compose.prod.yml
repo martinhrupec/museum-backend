@@ -67,6 +67,7 @@ services:
     environment:
       - DATABASE_HOST=postgres
       - REDIS_URL=redis://redis:6379/1
+      - TZ=Europe/Zagreb
     depends_on:
       postgres:
         condition: service_healthy
@@ -89,6 +90,7 @@ services:
     environment:
       - DATABASE_HOST=postgres
       - REDIS_URL=redis://redis:6379/1
+      - TZ=Europe/Zagreb
     depends_on:
       postgres:
         condition: service_healthy
@@ -111,6 +113,7 @@ services:
     environment:
       - DATABASE_HOST=postgres
       - REDIS_URL=redis://redis:6379/1
+      - TZ=Europe/Zagreb
     depends_on:
       postgres:
         condition: service_healthy

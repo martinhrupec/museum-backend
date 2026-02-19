@@ -26,6 +26,21 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
     
     queryset = Position.objects.all()
     
+    def get_queryset(self):
+        """Filter and order queryset
+        
+        Query params:
+            ordering: Sort order (date, -date)
+        """
+        queryset = Position.objects.all()
+        
+        # Ordering
+        ordering = self.request.query_params.get('ordering')
+        if ordering in ['date', '-date']:
+            queryset = queryset.order_by(ordering)
+        
+        return queryset
+    
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
         if self.action == 'list':
@@ -143,7 +158,7 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if existing_swap:
             return Response(
-                {'error': 'You already have an active swap request. Cancel it first.'},
+                {'error': 'Već imate aktivan zahtjev za zamjenu pozicije. Prvo otkazite trenutni zahtjev.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -155,7 +170,7 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if existing_position_swap:
             return Response(
-                {'error': 'This position already has a pending swap request'},
+                {'error': 'Ova pozicija već ima aktivan zahtjev za zamjenu'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         

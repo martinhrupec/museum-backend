@@ -1061,10 +1061,10 @@ def award_daily_completions():
             is_sunday = position.date.weekday() == 6
             if is_sunday:
                 points = Decimal(str(settings.award_for_sunday_position_completion))
-                explanation = f"Completed Sunday position ({position.exhibition.name}, {position.date})"
+                explanation = f"Odrađena nedjeljna pozicija ({position.exhibition.name}, {position.date})"
             else:
                 points = Decimal(str(settings.award_for_position_completion))
-                explanation = f"Completed position ({position.exhibition.name}, {position.date})"
+                explanation = f"Odrađena pozicija ({position.exhibition.name}, {position.date})"
             
             Point.objects.create(
                 guard=guard,

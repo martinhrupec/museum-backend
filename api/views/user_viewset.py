@@ -57,15 +57,47 @@ class UserViewSet(AuditLogMixin, viewsets.ModelViewSet):
         else:
             return UserDetailSerializer
     
+    # Valid ordering fields for sorting
+    VALID_ORDERINGS = [
+        'username', '-username',
+        'last_name', '-last_name',
+        'last_login', '-last_login',
+        'last_mobile_login', '-last_mobile_login',
+        'guard__priority_number', '-guard__priority_number',
+        'date_joined', '-date_joined',
+    ]
+    
     def get_queryset(self):
-        """Filter queryset based on user role and show only active users"""
+        """Filter queryset based on user role and show only active users
+        
+        Query params:
+            show_inactive: Show inactive users (true/false, admin only)
+            role: Filter by role (admin/guard)
+            ordering: Sort order (username, -username, last_name, -last_name,
+                      last_login, -last_login, last_mobile_login, -last_mobile_login,
+                      guard__priority_number, -guard__priority_number,
+                      date_joined, -date_joined)
+        """
         if self.request.user.role == User.ROLE_ADMIN:
             # Admin can see all users (including inactive ones with ?show_inactive=true)
             if self.request.query_params.get('show_inactive') == 'true':
-                return User.objects.all()
-            return User.objects.filter(is_active=True)
+                queryset = User.objects.all()
+            else:
+                queryset = User.objects.filter(is_active=True)
         else:
-            return User.objects.filter(is_active=True)
+            queryset = User.objects.filter(is_active=True)
+        
+        # Role filtering
+        role = self.request.query_params.get('role')
+        if role in [User.ROLE_ADMIN, User.ROLE_GUARD]:
+            queryset = queryset.filter(role=role)
+        
+        # Ordering
+        ordering = self.request.query_params.get('ordering')
+        if ordering in self.VALID_ORDERINGS:
+            queryset = queryset.order_by(ordering)
+        
+        return queryset
 
     def get_permissions(self):
         """Set permissions based on action using custom role-based permissions"""

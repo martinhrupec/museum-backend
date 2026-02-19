@@ -301,6 +301,7 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = False  # Use local timezone instead of converting to UTC
 
 # Celery Beat Schedule - scheduled tasks
 from celery.schedules import crontab

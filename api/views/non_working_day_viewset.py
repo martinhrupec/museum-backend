@@ -1,5 +1,6 @@
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
 import structlog
 
 from ..api_models import NonWorkingDay, AuditLog
@@ -21,6 +22,21 @@ class NonWorkingDayViewSet(viewsets.ModelViewSet):
     queryset = NonWorkingDay.objects.all()
     serializer_class = NonWorkingDaySerializer
     permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Filter queryset based on query params
+        
+        Query params:
+            in_future: Only return non-working days that haven't happened yet (true/false)
+        """
+        queryset = NonWorkingDay.objects.all()
+        
+        in_future = self.request.query_params.get('in_future')
+        if in_future == 'true':
+            today = timezone.now().date()
+            queryset = queryset.filter(date__gte=today)
+        
+        return queryset
     
     def get_permissions(self):
         """

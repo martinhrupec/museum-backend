@@ -46,8 +46,45 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
-        """All authenticated users can inspect the full audit trail"""
-        return PositionHistory.objects.select_related('guard__user', 'position__exhibition')
+        """All authenticated users can inspect the full audit trail
+        
+        Query params:
+            year: Filter by position date year (e.g., 2024)
+            month: Filter by position date month (1-12)
+            day: Filter by position date day (1-31)
+            ordering: Sort order (action_time, -action_time)
+        """
+        queryset = PositionHistory.objects.select_related('guard__user', 'position__exhibition')
+        
+        # Date filtering
+        year = self.request.query_params.get('year')
+        month = self.request.query_params.get('month')
+        day = self.request.query_params.get('day')
+        
+        if year:
+            try:
+                queryset = queryset.filter(position__date__year=int(year))
+            except ValueError:
+                pass
+        
+        if month:
+            try:
+                queryset = queryset.filter(position__date__month=int(month))
+            except ValueError:
+                pass
+        
+        if day:
+            try:
+                queryset = queryset.filter(position__date__day=int(day))
+            except ValueError:
+                pass
+        
+        # Ordering
+        ordering = self.request.query_params.get('ordering')
+        if ordering in ['action_time', '-action_time']:
+            queryset = queryset.order_by(ordering)
+        
+        return queryset
 
     def _ensure_manual_window_open(self, period, now, settings):
         if period != 'next_week':
@@ -260,7 +297,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     if position.start_time < other_position.end_time and other_position.start_time < position.end_time:
                         return Response(
                             {
-                                'error': f'Time conflict: You are already assigned to {other_position.exhibition.name} from {other_position.start_time.strftime("%H:%M")} to {other_position.end_time.strftime("%H:%M")} on this date.',
+                                'error': f'Vremenski konflikt: već ste prijavljeni na: {other_position.exhibition.name} od {other_position.start_time.strftime("%H:%M")} do {other_position.end_time.strftime("%H:%M")} na taj dan.',
                                 'conflicting_position': {
                                     'id': other_position.id,
                                     'exhibition': other_position.exhibition.name,
@@ -580,7 +617,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         today = now.date()
         if position.date != today:
             return Response(
-                {'error': 'Can only report lateness for today\'s positions.'},
+                {'error': 'Možete prijaviti kašnjenje samo za pozicije koje se odvijaju danas.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -588,7 +625,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         latest_history = position.position_histories.order_by('-action_time', '-id').first()
         if not latest_history or latest_history.action not in self._TAKEN_ACTIONS:
             return Response(
-                {'error': 'No guard is currently assigned to this position.'},
+                {'error': 'Trenutno nema čuvara na ovoj poziciji.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -597,13 +634,13 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             requester_guard = request.user.guard
         except Guard.DoesNotExist:
             return Response(
-                {'error': 'Guard profile not found for current user.'},
+                {'error': 'Profil čuvara nije pronađen za trenutnog korisnika.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if requester_guard != latest_history.guard:
             return Response(
-                {'error': 'You can only report lateness for your own positions.'},
+                {'error': 'Možete prijaviti kašnjenje samo za svoje pozicije.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
@@ -611,7 +648,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         penalty = settings.penalty_for_being_late_with_notification
         estimated_delay = request.data.get('estimated_delay_minutes', '')
         delay_info = f" ({estimated_delay} min delay)" if estimated_delay else ""
-        explanation = f"Penalty for being late with notification ({position.exhibition.name}, {position.date}){delay_info}"
+        explanation = f"Kazna za kašnjenje (uz pravovremenu najavu) ({position.exhibition.name}, {position.date}){delay_info}"
         
         point = Point.objects.create(
             guard=requester_guard,
@@ -765,10 +802,10 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                     is_same_day = (position.date == today)
                     if is_same_day:
                         penalty = settings.penalty_for_position_cancellation_on_the_position_day
-                        explanation = f"Bulk cancel penalty (same day) - First position: {position.exhibition.name}, {position.date}"
+                        explanation = f"Kazna za otkazivanje više smjena odjednom (na dan smjene) - Prva pozicija: {position.exhibition.name}, {position.date}"
                     else:
                         penalty = settings.penalty_for_position_cancellation_before_the_position_day
-                        explanation = f"Bulk cancel penalty - First position: {position.exhibition.name}, {position.date}"
+                        explanation = f"Kazna za otkazivanje više smjena odjednom (više od jednog dana prije te smjene) - Prva pozicija: {position.exhibition.name}, {position.date}"
                     
                     point = Point.objects.create(
                         guard=guard,

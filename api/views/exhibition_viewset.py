@@ -1,6 +1,7 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.utils import timezone
 import structlog
 
 from ..api_models import User, Exhibition, Position, SystemSettings
@@ -20,6 +21,40 @@ class ExhibitionViewSet(AuditLogMixin, viewsets.ModelViewSet):
     """
     
     queryset = Exhibition.objects.all()
+    
+    # Valid ordering fields for sorting
+    VALID_ORDERINGS = [
+        'name', '-name',
+        'start_date', '-start_date',
+        'end_date', '-end_date',
+    ]
+    
+    def get_queryset(self):
+        """Filter queryset based on query params
+        
+        Query params:
+            status: Filter by status (all/active/upcoming/finished)
+            ordering: Sort order (name, -name, start_date, -start_date, end_date, -end_date)
+        """
+        queryset = Exhibition.objects.all()
+        now = timezone.now()
+        
+        # Status filtering
+        status_param = self.request.query_params.get('status')
+        if status_param == 'active':
+            queryset = queryset.filter(start_date__lte=now, end_date__gte=now)
+        elif status_param == 'upcoming':
+            queryset = queryset.filter(start_date__gt=now)
+        elif status_param == 'finished':
+            queryset = queryset.filter(end_date__lt=now)
+        # 'all' or no status param returns everything
+        
+        # Ordering
+        ordering = self.request.query_params.get('ordering')
+        if ordering in self.VALID_ORDERINGS:
+            queryset = queryset.order_by(ordering)
+        
+        return queryset
     
     def get_serializer_class(self):
         """Return appropriate serializer based on user role and action"""

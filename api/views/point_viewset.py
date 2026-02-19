@@ -25,12 +25,32 @@ class PointViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        """Filter queryset based on user role"""
+        """Filter queryset based on user role and query params
+        
+        Query params:
+            guard_id: Filter by specific guard ID (admin only)
+            ordering: Sort order (date_awarded, -date_awarded)
+        """
         if self.request.user.role == User.ROLE_ADMIN:
-            return Point.objects.all()
+            queryset = Point.objects.all()
+            
+            # Guard filtering (admin only)
+            guard_id = self.request.query_params.get('guard_id')
+            if guard_id:
+                try:
+                    queryset = queryset.filter(guard_id=int(guard_id))
+                except ValueError:
+                    pass
         else:
             # Guards see only their own points
-            return Point.objects.filter(guard__user=self.request.user)
+            queryset = Point.objects.filter(guard__user=self.request.user)
+        
+        # Ordering
+        ordering = self.request.query_params.get('ordering')
+        if ordering in ['date_awarded', '-date_awarded']:
+            queryset = queryset.order_by(ordering)
+        
+        return queryset
     
     def get_permissions(self):
         """Only admins can create/update/delete points"""
