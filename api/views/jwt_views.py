@@ -48,7 +48,7 @@ def jwt_logout(request):
         refresh_token = request.data.get('refresh')
         if not refresh_token:
             return Response(
-                {'error': 'Refresh token is required'},
+                {'error': 'Refresh token je obavezan'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -57,11 +57,11 @@ def jwt_logout(request):
         token.blacklist()
         
         return Response(
-            {'message': 'Successfully logged out'},
+            {'message': 'Uspješno ste odjavljeni'},
             status=status.HTTP_200_OK
         )
     except Exception as e:
         return Response(
-            {'error': f'Invalid token: {str(e)}'},
+            {'error': f'Nevažeći token: {str(e)}'},
             status=status.HTTP_400_BAD_REQUEST
         )

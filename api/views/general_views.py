@@ -29,7 +29,7 @@ def session_login(request):
     
     if not username or not password:
         return Response(
-            {'error': 'Username and password required'}, 
+            {'error': 'Korisničko ime i lozinka su obavezni'}, 
             status=status.HTTP_400_BAD_REQUEST
         )
     
@@ -41,12 +41,12 @@ def session_login(request):
         # Use serializer for consistent user data format
         serializer = UserDetailSerializer(user)
         return Response({
-            'message': 'Login successful',
+            'message': 'Prijava uspješna',
             'user': serializer.data
         })
     
     return Response(
-        {'error': 'Invalid credentials or inactive account'}, 
+        {'error': 'Neispravni podaci za prijavu ili neaktivan račun'}, 
         status=status.HTTP_401_UNAUTHORIZED
     )
 
@@ -62,7 +62,7 @@ def session_logout(request):
     from django.contrib.auth import logout
     
     logout(request)
-    return Response({'message': 'Logout successful'})
+    return Response({'message': 'Odjava uspješna'})
 
 
 @api_view(['GET'])
@@ -86,7 +86,7 @@ def session_check(request):
     return Response(
         {
             'authenticated': False,
-            'error': 'Not authenticated'
+            'error': 'Niste prijavljeni'
         },
         status=status.HTTP_401_UNAUTHORIZED
     )

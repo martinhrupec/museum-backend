@@ -137,7 +137,7 @@ class PositionSwapRequestViewSet(viewsets.ModelViewSet):
         """
         if request.user.role == User.ROLE_ADMIN:
             return Response(
-                {'detail': 'Admins cannot access guard-only endpoints.'},
+                {'detail': 'Administratori ne mogu pristupiti ovom endpointu.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         guard = request.user.guard
@@ -161,7 +161,7 @@ class PositionSwapRequestViewSet(viewsets.ModelViewSet):
         
         if request.user.role == User.ROLE_ADMIN:
             return Response(
-                {'detail': 'Admins cannot access guard-only endpoints.'},
+                {'detail': 'Administratori ne mogu pristupiti ovom endpointu.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
@@ -170,7 +170,7 @@ class PositionSwapRequestViewSet(viewsets.ModelViewSet):
         position_id = request.data.get('position_id')
         if not position_id:
             return Response(
-                {'error': 'position_id is required'},
+                {'error': 'position_id je obavezan'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -179,7 +179,7 @@ class PositionSwapRequestViewSet(viewsets.ModelViewSet):
             position_offered = Position.objects.get(id=position_id)
         except Position.DoesNotExist:
             return Response(
-                {'error': 'Position not found'},
+                {'error': 'Pozicija nije pronađena'},
                 status=status.HTTP_404_NOT_FOUND
             )
         
@@ -194,7 +194,7 @@ class PositionSwapRequestViewSet(viewsets.ModelViewSet):
         # Check that position_offered is in the list of valid positions
         if position_offered not in eligibility['positions_can_offer']:
             return Response(
-                {'error': 'You cannot offer this position'},
+                {'error': 'Ne možete ponuditi ovu poziciju'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -248,14 +248,14 @@ class PositionSwapRequestViewSet(viewsets.ModelViewSet):
         # Check ownership
         if swap_request.requesting_guard != guard:
             return Response(
-                {'error': 'You can only cancel your own swap requests'},
+                {'error': 'Možete otkazati samo vlastite zahtjeve za zamjenu'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
         # Check status
         if swap_request.status != 'pending':
             return Response(
-                {'error': 'Can only cancel pending swap requests'},
+                {'error': 'Možete otkazati samo zahtjeve u tijeku'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -270,27 +270,27 @@ class PositionSwapRequestViewSet(viewsets.ModelViewSet):
         )
         
         return Response(
-            {'message': 'Swap request cancelled successfully'},
+            {'message': 'Zahtjev za zamjenu uspješno otkazan'},
             status=status.HTTP_200_OK
         )
     
     def create(self, request, *args, **kwargs):
         """Disable direct creation - use position endpoint instead"""
         return Response(
-            {'error': 'Use POST /api/positions/{id}/request_swap/ to create swap requests'},
+            {'error': 'Koristite POST /api/positions/{id}/request_swap/ za kreiranje zahtjeva za zamjenu'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )
     
     def update(self, request, *args, **kwargs):
         """Disable updates"""
         return Response(
-            {'error': 'Swap requests cannot be updated'},
+            {'error': 'Zahtjevi za zamjenu se ne mogu ažurirati'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )
     
     def partial_update(self, request, *args, **kwargs):
         """Disable partial updates"""
         return Response(
-            {'error': 'Swap requests cannot be updated'},
+            {'error': 'Zahtjevi za zamjenu se ne mogu ažurirati'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )

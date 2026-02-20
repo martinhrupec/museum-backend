@@ -61,7 +61,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         Guards are auto-created via signal when User with role=ROLE_GUARD is created.
         """
         return Response(
-            {'error': 'Guards cannot be created directly. Create a User with role=guard instead.'},
+            {'error': 'Čuvari se ne mogu kreirati direktno. Kreirajte korisnika s role=guard.'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )
     
@@ -98,7 +98,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not config_start or not config_end:
             return Response(
-                {'error': 'Configuration window not initialized yet. Weekly task must complete first.'},
+                {'error': 'Konfiguracijski period još nije počeo. Pričekajte da tjedni zadatak završi.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
@@ -106,7 +106,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if now < config_start:
             return Response(
                 {
-                    'error': 'Configuration window is not open yet.',
+                    'error': 'Konfiguracijski period još nije počeo.',
                     'configuration_opens_at': config_start.isoformat(),
                 },
                 status=status.HTTP_403_FORBIDDEN
@@ -115,7 +115,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if now >= config_end:
             return Response(
                 {
-                    'error': 'Configuration window has closed. Changes can only be made Monday-Wednesday.',
+                    'error': 'Konfiguracijski period je završio.',
                     'configuration_closed_at': config_end.isoformat(),
                 },
                 status=status.HTTP_403_FORBIDDEN
@@ -147,7 +147,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not settings.next_week_start or not settings.next_week_end:
             return Response(
-                {'error': 'Next week period not set yet.'},
+                {'error': 'Period sljedećeg tjedna još nije postavljen.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
@@ -204,7 +204,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not settings.next_week_start or not settings.next_week_end:
             return Response(
-                {'error': 'Next week period not set yet.'},
+                {'error': 'Period sljedećeg tjedna još nije postavljen.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
@@ -564,7 +564,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not isinstance(exhibition_ids, list):
             return Response(
-                {'error': 'exhibition_ids must be an array'},
+                {'error': 'exhibition_ids mora biti lista'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -573,7 +573,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not settings.next_week_start or not settings.next_week_end:
             return Response(
-                {'error': 'Next week period not set yet. Weekly task needs to run first.'},
+                {'error': 'Period sljedećeg tjedna još nije postavljen. Pričekajte da tjedni zadatak završi.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
@@ -592,7 +592,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 is_template=False
             ).delete()
             return Response({
-                'message': 'Preferences cleared successfully',
+                'message': 'Preferencije uspješno obrisane',
                 'preference': None
             })
         
@@ -673,11 +673,11 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         serializer = GuardExhibitionPreferenceSerializer(preference)
         
-        message = f'Successfully set preferences for {len(exhibition_ids)} exhibitions'
+        message = f'Uspješno postavljene preferencije za {len(exhibition_ids)} izložbi'
         if save_as_template:
-            message += ' and saved as template for future weeks.'
+            message += ' i spremljene su kao predložak za buduće tjedne.'
         else:
-            message += f' for week {settings.next_week_start} - {settings.next_week_end}.'
+            message += f' za tjedan {settings.next_week_start} - {settings.next_week_end}.'
         
         return Response({
             'message': message,
@@ -729,7 +729,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not isinstance(day_of_week_list, list):
             return Response(
-                {'error': 'day_of_week_list must be an array'},
+                {'error': 'day_of_week_list mora biti lista'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -757,7 +757,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 is_template=False
             ).delete()
             return Response({
-                'message': 'Preferences cleared successfully',
+                'message': 'Preferencije uspješno obrisane',
                 'preference': None
             })
         
@@ -820,11 +820,11 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         serializer = GuardDayPreferenceSerializer(preference)
         
-        message = f'Successfully set preferences for {len(day_of_week_list)} days'
+        message = f'Uspješno postavljene preferencije za {len(day_of_week_list)} dana'
         if save_as_template:
-            message += ' and saved as template for future weeks.'
+            message += ' i spremljeno kao predložak za buduće tjedne.'
         else:
-            message += f' for week {settings.next_week_start} - {settings.next_week_end}.'
+            message += f' za tjedan {settings.next_week_start} - {settings.next_week_end}.'
         
         return Response({
             'message': message,

@@ -90,7 +90,7 @@ class ExhibitionViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not settings.next_week_start or not settings.next_week_end:
             return Response(
-                {'error': 'Next week period not set yet. Weekly task needs to run first.'},
+                {'error': 'Period sljedećeg tjedna još nije postavljen. Pričekajte da se tjedni zadatak završi.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         

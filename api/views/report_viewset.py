@@ -66,14 +66,14 @@ class ReportViewSet(viewsets.ModelViewSet):
         # Check if user is admin
         if request.user.role == User.ROLE_ADMIN:
             return Response(
-                {'detail': 'Admins cannot create reports.'},
+                {'detail': 'Administratori ne mogu kreirati prijave recepciji.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
         # Check if user has guard profile
         if not hasattr(request.user, 'guard'):
             return Response(
-                {'detail': 'Only guards can create reports.'},
+                {'detail': 'Samo čuvari mogu kreirati prijave recepciji.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
@@ -101,20 +101,20 @@ class ReportViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         """Reports cannot be updated"""
         return Response(
-            {'error': 'Reports cannot be updated'},
+            {'error': 'Prijave recepciji se ne mogu ažurirati'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )
     
     def partial_update(self, request, *args, **kwargs):
         """Reports cannot be updated"""
         return Response(
-            {'error': 'Reports cannot be updated'},
+            {'error': 'Prijave recepciji se ne mogu ažurirati'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )
     
     def destroy(self, request, *args, **kwargs):
         """Reports cannot be deleted"""
         return Response(
-            {'error': 'Reports cannot be deleted'},
+            {'error': 'Prijave recepciji se ne mogu obrisati'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )

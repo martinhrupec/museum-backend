@@ -92,13 +92,13 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         manual_open = settings.manual_assignment_start_datetime
         if manual_open is None:
             return Response(
-                {'error': 'Manual assignment window not initialized yet. Weekly task must complete first.'},
+                {'error': 'Period ručnog upisivanja/ispisivanja još nije inicijaliziran. Pričekajte da se tjedni zadatak završi.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         if now < manual_open:
             return Response(
                 {
-                    'error': 'Manual assignment for next week is not open yet.',
+                    'error': 'Ručno upisivanje/ispisivanje za sljedeći tjedan još nije otvoreno.',
                     'manual_assignment_window_opens_at': manual_open.isoformat(),
                 },
                 status=status.HTTP_403_FORBIDDEN
@@ -145,7 +145,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if assigned_count >= minimum:
             return Response(
                 {
-                    'error': f'Grace period restriction: You have {assigned_count} positions (>= minimum {minimum}). Cannot assign more during first hour.',
+                    'error': f'Ograničenje fer perioda: Imate {assigned_count} pozicija (>= minimum {minimum}). Ne možete upisati više od toga tijekom prvog sata.',
                     'grace_period_ends_at': grace_end.isoformat(),
                     'your_assigned_positions': assigned_count,
                     'minimum_required': minimum
@@ -161,18 +161,18 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if request.user.role == User.ROLE_ADMIN:
             guard_id = request.data.get('guard_id')
             if not guard_id:
-                raise serializers.ValidationError('guard_id is required for admin actions.')
+                raise serializers.ValidationError('guard_id je obavezan za administratorske akcije.')
             guard = get_object_or_404(Guard, pk=guard_id)
             if not guard.user.is_active:
-                raise serializers.ValidationError('Selected guard is not active.')
+                raise serializers.ValidationError('Odabrani čuvar nije aktivan.')
             return guard
         # Guard user
         try:
             guard = request.user.guard
         except Guard.DoesNotExist:
-            raise serializers.ValidationError('Guard profile not found for current user.')
+            raise serializers.ValidationError('Profil čuvara nije pronađen za trenutnog korisnika.')
         if not guard.user.is_active:
-            raise serializers.ValidationError('Your account is inactive.')
+            raise serializers.ValidationError('Vaš račun nije aktivan.')
         return guard
     
     def _invalidate_schedule_cache(self, position, settings):
@@ -266,7 +266,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             if period is None:
                 return Response(
                     {
-                        'error': 'Position is not part of current or next week scheduling window.',
+                        'error': 'Pozicija nije dio rasporeda za ovaj ili sljedeći tjedan.',
                         'debug_info': {
                             'position_date': str(position.date),
                             'this_week_start': str(settings.this_week_start) if settings.this_week_start else None,
@@ -280,7 +280,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             start_dt = position.get_start_datetime()
             if now >= start_dt:
                 return Response(
-                    {'error': 'Cannot assign position that already started.'},
+                    {'error': 'Ne možete upisati poziciju koja je već započela.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
@@ -320,12 +320,12 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             latest_history = position.position_histories.order_by('-action_time', '-id').first()
             if latest_history and latest_history.action in self._TAKEN_ACTIONS:
                 return Response(
-                    {'error': 'Position is already taken.'},
+                    {'error': 'Pozicija je već zauzeta.'},
                     status=status.HTTP_409_CONFLICT
                 )
             if latest_history and latest_history.action != PositionHistory.Action.CANCELLED:
                 return Response(
-                    {'error': 'Position is not currently available.'},
+                    {'error': 'Pozicija trenutno nije dostupna.'},
                     status=status.HTTP_409_CONFLICT
                 )
             if latest_history is None:
@@ -383,7 +383,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             
             return Response(
                 {
-                    'message': 'Position successfully assigned.',
+                    'message': 'Pozicija uspješno dodijeljena.',
                     'history': PositionHistorySerializer(history).data,
                     'reward_applied': reward_applied
                 },
@@ -400,7 +400,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if period is None:
             return Response(
                 {
-                    'error': 'Position is not part of current or next week scheduling window.',
+                    'error': 'Pozicija nije dio rasporeda za ovaj ili sljedeći tjedan.',
                     'debug_info': {
                         'position_date': str(position.date),
                         'this_week_start': str(settings.this_week_start) if settings.this_week_start else None,
@@ -414,7 +414,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         start_dt = position.get_start_datetime()
         if now >= start_dt:
             return Response(
-                {'error': 'Cannot cancel a position that already started.'},
+                {'error': 'Ne možete otkazati poziciju koja je već započela.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         window_error = self._ensure_manual_window_open(period, now, settings)
@@ -423,7 +423,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         latest_history = position.position_histories.order_by('-action_time', '-id').first()
         if not latest_history or latest_history.action not in self._TAKEN_ACTIONS:
             return Response(
-                {'error': 'Position is not currently assigned to any guard.'},
+                {'error': 'Pozicija trenutno nije dodijeljena nijednom čuvaru.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         current_guard = latest_history.guard
@@ -431,19 +431,19 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             guard_id = request.data.get('guard_id')
             if not guard_id:
                 return Response(
-                    {'error': 'guard_id is required for admin cancellations.'},
+                    {'error': 'guard_id je obavezan za administratorska otkazivanja.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             try:
                 parsed_guard_id = int(guard_id)
             except (TypeError, ValueError):
                 return Response(
-                    {'error': 'guard_id must be an integer value.'},
+                    {'error': 'guard_id mora biti cijeli broj.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             if parsed_guard_id != current_guard.id:
                 return Response(
-                    {'error': 'Provided guard is not assigned to this position.'},
+                    {'error': 'Navedeni čuvar nije dodijeljen ovoj poziciji.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             guard_for_cancel = current_guard
@@ -452,12 +452,12 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 requester_guard = request.user.guard
             except Guard.DoesNotExist:
                 return Response(
-                    {'error': 'Guard profile not found for current user.'},
+                    {'error': 'Profil čuvara nije pronađen za trenutnog korisnika.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             if requester_guard != current_guard:
                 return Response(
-                    {'error': 'You can only cancel positions you are assigned to.'},
+                    {'error': 'Možete ispisati samo pozicije na kojima ste upisani.'},
                     status=status.HTTP_403_FORBIDDEN
                 )
             guard_for_cancel = requester_guard
@@ -530,7 +530,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         return Response(
             {
-                'message': 'Assignment cancelled successfully.',
+                'message': 'Pozicija uspješno ispisana.',
                 'history': PositionHistorySerializer(history).data,
                 'penalty_applied': penalty_applied
             },
@@ -543,7 +543,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         settings = SystemSettings.get_active()
         if not settings.this_week_start or not settings.this_week_end:
             return Response(
-                {'error': 'This week period not set yet. Weekly task needs to run first.'},
+                {'error': 'Period ovog tjedna još nije definiran. Pričekajte da se tjedni zadatak završi.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
@@ -569,7 +569,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         settings = SystemSettings.get_active()
         if not settings.next_week_start or not settings.next_week_end:
             return Response(
-                {'error': 'Next week period not set yet. Weekly task needs to run first.'},
+                {'error': 'Period sljedećeg tjedna još nije definiran. Pričekajte da se tjedni zadatak završi.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
@@ -678,7 +678,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         return Response(
             {
-                'message': 'Lateness reported successfully.',
+                'message': 'Kašnjenje uspješno prijavljeno.',
                 'penalty_applied': {
                     'points': float(penalty),
                     'explanation': explanation
@@ -707,7 +707,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # Only guards can use bulk cancel
         if request.user.role == User.ROLE_ADMIN:
             return Response(
-                {'error': 'Administrators cannot use bulk cancel. Only guards can cancel their shifts.'},
+                {'error': 'Administratori ne mogu koristiti grupno otkazivanje. Samo čuvari mogu otkazati svoje smjene.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         start_date_str = request.data.get('start_date')
@@ -715,7 +715,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not start_date_str or not end_date_str:
             return Response(
-                {'error': 'start_date and end_date are required.'},
+                {'error': 'start_date i end_date su obavezni.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         try:
@@ -724,12 +724,12 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             end_date = dt.strptime(end_date_str, '%Y-%m-%d').date()
         except ValueError:
             return Response(
-                {'error': 'Invalid date format. Use YYYY-MM-DD.'},
+                {'error': 'Neispravan format datuma. Koristite YYYY-MM-DD.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         if start_date > end_date:
             return Response(
-                {'error': 'start_date must be before or equal to end_date.'},
+                {'error': 'start_date mora biti prije ili jednak end_date.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         # Get guard
@@ -737,7 +737,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             guard = request.user.guard
         except Guard.DoesNotExist:
             return Response(
-                {'error': 'Guard profile not found for current user.'},
+                {'error': 'Profil čuvara nije pronađen za trenutnog korisnika.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         settings = SystemSettings.get_active()
@@ -764,7 +764,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not positions_to_cancel:
             return Response(
-                {'error': 'No assigned positions found in the specified date range.'},
+                {'error': 'Nema prijavljenih pozicija u navedenom rasponu datuma.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -822,7 +822,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             self._invalidate_schedule_cache(position, settings)
         return Response(
             {
-                'message': f'Successfully cancelled {cancelled_count} position(s).',
+                'message': f'Uspješno otkazivanje. Broj otkazanih pozicija: {cancelled_count}',
                 'cancelled_count': cancelled_count,
                 'penalty_applied': penalty_applied,
                 'positions': [
@@ -860,7 +860,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             guard = request.user.guard
         except Guard.DoesNotExist:
             return Response(
-                {'error': 'Guard profile not found for current user.'},
+                {'error': 'Profil čuvara nije pronađen za trenutnog korisnika.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -870,7 +870,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not year_str:
             return Response(
-                {'error': 'year parameter is required.'},
+                {'error': 'Parametar year je obavezan.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -878,14 +878,14 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             year = int(year_str)
         except ValueError:
             return Response(
-                {'error': 'year must be a valid integer.'},
+                {'error': 'year mora biti valjani cijeli broj.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         # Validate year range
         if year < 2020 or year > 2100:
             return Response(
-                {'error': 'year must be between 2020 and 2100.'},
+                {'error': 'year mora biti između 2020 i 2100.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -896,13 +896,13 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 month = int(month_str)
             except ValueError:
                 return Response(
-                    {'error': 'month must be a valid integer (1-12).'},
+                    {'error': 'month mora biti valjani cijeli broj (1-12).'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
             if month < 1 or month > 12:
                 return Response(
-                    {'error': 'month must be between 1 and 12.'},
+                    {'error': 'month mora biti između 1 i 12.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         
@@ -1043,7 +1043,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not year_str or not month_str:
             return Response(
-                {'error': 'year and month parameters are required.'},
+                {'error': 'Parametri year i month su obavezni.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1052,19 +1052,19 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             month = int(month_str)
         except ValueError:
             return Response(
-                {'error': 'year and month must be valid integers.'},
+                {'error': 'year i month moraju biti valjani cijeli brojevi.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if year < 2020 or year > 2100:
             return Response(
-                {'error': 'year must be between 2020 and 2100.'},
+                {'error': 'year mora biti između 2020 i 2100.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if month < 1 or month > 12:
             return Response(
-                {'error': 'month must be between 1 and 12.'},
+                {'error': 'month mora biti između 1 i 12.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1083,14 +1083,14 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         if guard_filter == 'me':
             if is_admin:
                 return Response(
-                    {'error': 'Admins cannot use "me" filter. Use "all" or a specific guard_id.'},
+                    {'error': 'Administratori ne mogu koristiti filter "me". Koristite "all" ili specifični guard_id.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             try:
                 filter_guard = request.user.guard
             except Guard.DoesNotExist:
                 return Response(
-                    {'error': 'Guard profile not found for current user.'},
+                    {'error': 'Profil čuvara nije pronađen za trenutnog korisnika.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         elif guard_filter != 'all':
@@ -1100,12 +1100,12 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 filter_guard = Guard.objects.get(pk=guard_id)
             except (ValueError, TypeError):
                 return Response(
-                    {'error': 'guard_id must be "all", "me", or a valid integer.'},
+                    {'error': 'guard_id mora biti "all", "me" ili valjani cijeli broj.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             except Guard.DoesNotExist:
                 return Response(
-                    {'error': f'Guard with id {guard_filter} not found.'},
+                    {'error': f'Čuvar s ID-om {guard_filter} nije pronađen.'},
                     status=status.HTTP_404_NOT_FOUND
                 )
         
@@ -1224,7 +1224,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # Admin only
         if request.user.role != User.ROLE_ADMIN:
             return Response(
-                {'error': 'Only administrators can access monthly earnings summary.'},
+                {'error': 'Samo administratori mogu pristupiti mjesečnom pregledu zarade.'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
@@ -1234,7 +1234,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not month or not year:
             return Response(
-                {'error': 'month and year are required.'},
+                {'error': 'month i year su obavezni.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1243,19 +1243,19 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             year = int(year)
         except (ValueError, TypeError):
             return Response(
-                {'error': 'month and year must be valid integers.'},
+                {'error': 'month i year moraju biti valjani cijeli brojevi.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if year < 2020 or year > 2100:
             return Response(
-                {'error': 'year must be between 2020 and 2100.'},
+                {'error': 'year mora biti između 2020 i 2100.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
         if month < 1 or month > 12:
             return Response(
-                {'error': 'month must be between 1 and 12.'},
+                {'error': 'month mora biti između 1 i 12.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         

@@ -83,7 +83,7 @@ class SystemSettingsViewSet(AuditLogMixin, viewsets.ModelViewSet):
         """Create initial settings (only if none exist)"""
         if SystemSettings.objects.filter(is_active=True).exists():
             return Response(
-                {'error': 'Active settings already exist. Use PUT/PATCH to update.'},
+                {'error': 'Aktivne postavke već postoje. Koristite PUT/PATCH za ažuriranje.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -96,7 +96,7 @@ class SystemSettingsViewSet(AuditLogMixin, viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """Prevent deletion"""
         return Response(
-            {'error': 'System settings cannot be deleted'},
+            {'error': 'Sistemske postavke se ne mogu obrisati'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED
         )
     

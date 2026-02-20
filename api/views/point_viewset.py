@@ -87,7 +87,7 @@ class PointViewSet(viewsets.ModelViewSet):
         
         if not guard_id:
             return Response(
-                {'error': 'guard_id is required'},
+                {'error': 'guard_id je obavezan'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -113,7 +113,7 @@ class PointViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(point)
         return Response(
             {
-                'message': 'Penalty applied successfully',
+                'message': 'Kazna uspješno primijenjena',
                 'point': serializer.data
             },
             status=status.HTTP_201_CREATED

@@ -69,7 +69,7 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if not settings.next_week_start or not settings.next_week_end:
             return Response(
-                {'error': 'Next week period not set yet. Weekly task needs to run first.'},
+                {'error': 'Period sljedećeg tjedna još nije definiran. Pričekajte da tjedni zadatak završi.'},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         
@@ -107,7 +107,7 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         if request.user.role == User.ROLE_ADMIN:
             return Response(
-                {'detail': 'Admins cannot request position swaps.'},
+                {'detail': 'Administratori ne mogu tražiti zamjenu pozicija.'},
                 status=status.HTTP_403_FORBIDDEN
             )
             
@@ -121,7 +121,7 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
             manual_end = settings.manual_assignment_end_datetime
             if manual_end is None or timezone.now() < manual_end:
                 return Response(
-                    {'error': 'Swap requests for next week can only be made after manual configuration period ends'},
+                    {'error': 'Zahtjevi za zamjenu za sljedeći tjedan mogu se napraviti tek nakon završetka perioda ručne konfiguracije'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         
@@ -136,7 +136,7 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
         latest_history = position.position_histories.order_by('-action_time').first()
         if not latest_history or latest_history.guard != guard:
             return Response(
-                {'error': 'You are not assigned to this position'},
+                {'error': 'Niste prijavljeni na ovu poziciju'},
                 status=status.HTTP_403_FORBIDDEN
             )
         
@@ -146,7 +146,7 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
             PositionHistory.Action.SWAPPED
         ]:
             return Response(
-                {'error': 'Position is not in assigned state'},
+                {'error': 'Pozicija ne može biti upisana.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -201,6 +201,6 @@ class PositionViewSet(AuditLogMixin, viewsets.ModelViewSet):
         serializer = PositionSwapRequestSerializer(swap_request)
         
         return Response({
-            'message': 'Swap request created successfully',
+            'message': 'Zahtjev za zamjenu uspješno kreiran',
             'swap_request': serializer.data
         }, status=status.HTTP_201_CREATED)

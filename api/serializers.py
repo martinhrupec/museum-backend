@@ -98,7 +98,7 @@ class UserAdminSerializer(serializers.ModelSerializer):
         # If this is a CREATE operation (no instance exists) and no password provided
         if not self.instance and not data.get('password'):
             raise serializers.ValidationError({
-                'password': 'Password is required when creating a new user.'
+                'password': 'Lozinka je obavezna pri izradi novog korisnika.'
             })
         return data
     
@@ -379,8 +379,8 @@ class ExhibitionAdminSerializer(serializers.ModelSerializer):
         
         if not set(value).issubset(set(settings.workdays)):
             raise serializers.ValidationError(
-                f"Exhibition days must be a subset of museum workdays. "
-                f"Museum workdays: {settings.workdays}, Provided: {value}"
+                f"Dani izložbe moraju biti podskup radnih dana muzeja. "
+                f"Radni dani muzeja: {settings.workdays}, Pruženo: {value}"
             )
         
         return value
@@ -582,13 +582,13 @@ class GuardWorkPeriodSerializer(serializers.ModelSerializer):
     def validate_day_of_week(self, value):
         """Validate day of week is between 0-6"""
         if not (0 <= value <= 6):
-            raise serializers.ValidationError("Day of week must be between 0 (Monday) and 6 (Sunday)")
+            raise serializers.ValidationError("Dan u tjednu mora biti između 0 (ponedjeljak) i 6 (nedjelja)")
         return value
     
     def validate_shift_type(self, value):
         """Validate shift type is morning or afternoon"""
         if value not in ['morning', 'afternoon']:
-            raise serializers.ValidationError("Shift type must be 'morning' or 'afternoon'")
+            raise serializers.ValidationError("Tip smjene mora biti 'morning' ili 'afternoon'")
         return value
 
 

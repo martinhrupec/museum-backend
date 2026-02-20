@@ -29,10 +29,10 @@ class AuditLogFilter(filters.FilterSet):
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    ViewSet for viewing audit logs (read-only).
+    ViewSet za pregled audit logova (samo čitanje).
     
-    Only admins can access audit logs.
-    Provides filtering by user, model, action type, and date range.
+    Samo admini mogu pristupiti audit logovima.
+    Omogućuje filtriranje po korisniku, modelu, akciji i datumu.
     """
     
     queryset = AuditLog.objects.all().select_related('user')
@@ -40,6 +40,64 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAdminRole]
     filterset_class = AuditLogFilter
     ordering = ['-timestamp']
+    
+    def get_queryset(self):
+        """Filtriraj queryset temeljem query parametara
+        
+        Query params:
+            action: Filtriraj po tipu akcije (CREATE/UPDATE/DELETE/BULK_UPDATE/BULK_DELETE)
+            user_id: Filtriraj po ID-u korisnika
+            year: Filtriraj po godini (npr. 2026)
+            month: Filtriraj po mjesecu (1-12)
+            day: Filtriraj po danu (1-31)
+            ordering: Sortiraj (timestamp, -timestamp)
+        """
+        queryset = AuditLog.objects.all().select_related('user')
+        
+        # Filter po akciji
+        action = self.request.query_params.get('action')
+        if action and action in [choice[0] for choice in AuditLog.Action.choices]:
+            queryset = queryset.filter(action=action)
+        
+        # Filter po korisniku
+        user_id = self.request.query_params.get('user_id')
+        if user_id:
+            try:
+                queryset = queryset.filter(user_id=int(user_id))
+            except ValueError:
+                pass
+        
+        # Filter po datumu (godina, mjesec, dan)
+        year = self.request.query_params.get('year')
+        month = self.request.query_params.get('month')
+        day = self.request.query_params.get('day')
+        
+        if year:
+            try:
+                queryset = queryset.filter(timestamp__year=int(year))
+            except ValueError:
+                pass
+        
+        if month:
+            try:
+                queryset = queryset.filter(timestamp__month=int(month))
+            except ValueError:
+                pass
+        
+        if day:
+            try:
+                queryset = queryset.filter(timestamp__day=int(day))
+            except ValueError:
+                pass
+        
+        # Sortiranje
+        ordering = self.request.query_params.get('ordering')
+        if ordering in ['timestamp', '-timestamp']:
+            queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('-timestamp')
+        
+        return queryset
     
     @action(detail=False, methods=['get'])
     def summary(self, request):
