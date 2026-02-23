@@ -354,7 +354,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 
                 if should_reward:
                     reward = settings.award_for_jumping_in_on_cancelled_position
-                    explanation = f"Award for jumping in on cancelled position ({position.exhibition.name}, {position.date})"
+                    explanation = f"Nagrada za uskakanje na otkazanu poziciju ({position.exhibition.name}, {position.date})"
                     
                     reward_point = Point.objects.create(
                         guard=guard,

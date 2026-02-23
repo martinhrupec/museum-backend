@@ -156,11 +156,7 @@ class AdminNotification(models.Model):
         if self.cast_type == self.CAST_UNICAST:
             if not self.to_user:
                 raise ValidationError("Unicast notification must have to_user set.")
-        
-        elif self.cast_type == self.CAST_MULTICAST:
-            if not self.notification_date:
-                raise ValidationError("Multicast notification must have notification_date set.")
-        
+            
         elif self.cast_type == self.CAST_BROADCAST:
             # Broadcast doesn't need any additional fields
             pass
