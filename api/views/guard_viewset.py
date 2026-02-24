@@ -349,9 +349,24 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
             )
         
         # Update availability
+        old_availability = guard.availability
         guard.availability = available_shifts
         guard.availability_updated_at = timezone.now()
         guard.save()
+        
+        # Log the change to audit log
+        from ..api_models import AuditLog
+        AuditLog.log_update(
+            user=request.user,
+            instance=guard,
+            changed_fields={
+                'availability': {
+                    'old': str(old_availability) if old_availability is not None else None,
+                    'new': str(available_shifts)
+                }
+            },
+            request=request
+        )
         
         serializer = self.get_serializer(guard)
         response_data = {
@@ -480,6 +495,15 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 next_week_start=settings.next_week_start  # Always set, even for templates
             )
             created_periods.append(period)
+        
+        # Log work periods creation to audit log
+        from ..api_models import AuditLog
+        for period in created_periods:
+            AuditLog.log_create(
+                user=request.user,
+                instance=period,
+                request=request
+            )
         
         # CASCADE: When work periods change, preferences are no longer valid
         # Delete all day and exhibition preferences for this guard
@@ -661,6 +685,14 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
             next_week_start=None if save_as_template else settings.next_week_start
         )
         
+        # Log preference creation to audit log
+        from ..api_models import AuditLog
+        AuditLog.log_create(
+            user=request.user,
+            instance=preference,
+            request=request
+        )
+        
         logger.info(
             "exhibition_preferences_set",
             guard_id=guard.id,
@@ -806,6 +838,14 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
             day_order=day_of_week_list,
             is_template=save_as_template,
             next_week_start=None if save_as_template else settings.next_week_start
+        )
+        
+        # Log preference creation to audit log
+        from ..api_models import AuditLog
+        AuditLog.log_create(
+            user=request.user,
+            instance=preference,
+            request=request
         )
         
         logger.info(

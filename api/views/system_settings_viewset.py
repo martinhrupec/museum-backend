@@ -71,6 +71,15 @@ class SystemSettingsViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 user_id=request.user.id,
                 username=request.user.username
             )
+            
+            # Log to audit log
+            from ..api_models import AuditLog
+            AuditLog.log_update(
+                user=request.user,
+                instance=instance,
+                changed_fields=changed_fields,
+                request=request
+            )
         
         return Response(serializer.data, status=status.HTTP_200_OK)
     
@@ -89,7 +98,15 @@ class SystemSettingsViewSet(AuditLogMixin, viewsets.ModelViewSet):
         
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(updated_by=request.user, is_active=True)
+        instance = serializer.save(updated_by=request.user, is_active=True)
+        
+        # Log to audit log
+        from ..api_models import AuditLog
+        AuditLog.log_create(
+            user=request.user,
+            instance=instance,
+            request=request
+        )
         
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
