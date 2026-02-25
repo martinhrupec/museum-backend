@@ -70,12 +70,6 @@ def build_score_matrix(guards, positions, settings, availability_caps):
     E.g., if Guard A has availability=2, they appear as 2 rows in the matrix.
     This allows Hungarian algorithm to assign multiple positions per guard.
     
-    IMPORTANT: Each guard's row slots are constrained so that overlapping positions
-    cannot be assigned to the same guard. This is done by:
-    1. For each guard, identifying which positions overlap
-    2. Assigning overlapping positions to DIFFERENT row slots of the same guard
-    3. Making impossible combinations have score -9999
-    
     Matrix shape: (total_slots, n_positions) where total_slots = sum of all availabilities
     Each cell contains normalized score 0-1 for guard-position pair.
     Impossible pairs get -9999 (filtered in post-processing).
@@ -111,14 +105,6 @@ def build_score_matrix(guards, positions, settings, availability_caps):
         f"Building score matrix: {len(guards)} guards with {total_slots} total slots "
         f"x {n_positions} positions"
     )
-    
-    # Build position overlap map - which positions overlap with each other
-    overlap_map = build_overlap_groups(positions)
-    
-    # Log overlap info
-    overlapping_pairs = sum(len(v) for v in overlap_map.values()) // 2
-    if overlapping_pairs > 0:
-        logger.info(f"Found {overlapping_pairs} pairs of overlapping positions")
     
     # Initialize matrix and row mapping
     score_matrix = np.zeros((total_slots, n_positions))
@@ -167,40 +153,12 @@ def build_score_matrix(guards, positions, settings, availability_caps):
     )
     
     # Build matrix: duplicate each guard according to capped availability
+    # Each slot of the guard can potentially work ANY valid position
     current_row = 0
     for guard in guards:
         guard_availability = availability_caps.get(guard.id, guard.availability)
         priority_norm = priority_normalized[guard.id]
         valid_position_ids = guard_positions_map[guard.id]
-        
-        # Get valid position indices for this guard
-        valid_position_indices = [
-            j for j, pos in enumerate(positions) 
-            if pos.id in valid_position_ids
-        ]
-        
-        # Group valid positions by overlap - positions that overlap must go to different slots
-        # Use greedy coloring: assign each position to the lowest slot number where it doesn't
-        # conflict with already-assigned positions in that slot
-        position_to_slot = {}  # {position_index: assigned_slot}
-        
-        for pos_idx in valid_position_indices:
-            # Find which slots are already "taken" by overlapping positions
-            taken_slots = set()
-            for overlap_idx in overlap_map.get(pos_idx, set()):
-                if overlap_idx in position_to_slot:
-                    taken_slots.add(position_to_slot[overlap_idx])
-            
-            # Assign to lowest available slot
-            assigned_slot = 0
-            while assigned_slot in taken_slots:
-                assigned_slot += 1
-            
-            # If assigned_slot >= guard_availability, this position can't be assigned
-            # (guard doesn't have enough slots for all non-overlapping work)
-            if assigned_slot < guard_availability:
-                position_to_slot[pos_idx] = assigned_slot
-            # else: position will get -9999 for all this guard's slots
         
         # Create N rows for this guard (N = capped availability from caps dict)
         for slot in range(guard_availability):
@@ -212,18 +170,8 @@ def build_score_matrix(guards, positions, settings, availability_caps):
                     score_matrix[current_row, j] = -9999
                     continue
                 
-                # Check if this position is assigned to this slot
-                assigned_slot = position_to_slot.get(j)
-                if assigned_slot is None or assigned_slot != slot:
-                    # This position is either:
-                    # - Not assignable to this guard (too many overlaps for their availability)
-                    # - Assigned to a different slot
-                    score_matrix[current_row, j] = -9999
-                    continue
-                
                 # Calculate components
                 # 1. Priority (min-max normalized → 0-1)
-                # Already normalized above
                 
                 # 2. Exhibition preference (0-2 → 0-1)
                 exhibition_score = calculate_exhibition_preference_score(
@@ -257,18 +205,70 @@ def build_score_matrix(guards, positions, settings, availability_caps):
     return score_matrix, row_to_guard_map, guard_work_periods_map, guard_positions_map
 
 
+def filter_overlapping_assignments(assignments, positions):
+    """
+    Filter overlapping assignments per guard, keeping highest score.
+    
+    Returns:
+        tuple: (valid_assignments, freed_position_indices)
+        - valid_assignments: list of non-overlapping assignments
+        - freed_position_indices: set of position indices that were filtered out
+    """
+    guard_assignments = defaultdict(list)
+    for a in assignments:
+        guard_assignments[a['guard'].id].append(a)
+    
+    valid_assignments = []
+    freed_position_indices = set()
+    
+    for guard_id, assigns in guard_assignments.items():
+        if len(assigns) == 1:
+            valid_assignments.append(assigns[0])
+            continue
+        
+        # Sort by score descending (highest first)
+        assigns.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Keep non-overlapping positions (greedy by score)
+        kept = []
+        for a in assigns:
+            pos = a['position']
+            overlap_found = False
+            for kept_a in kept:
+                kept_pos = kept_a['position']
+                if positions_overlap(pos, kept_pos):
+                    overlap_found = True
+                    freed_position_indices.add(a['pos_idx'])
+                    logger.debug(
+                        f"Filtered overlap: {a['guard'].user.username} - "
+                        f"{pos.exhibition.name} ({pos.date} {pos.start_time}) "
+                        f"conflicts with {kept_pos.exhibition.name}"
+                    )
+                    break
+            
+            if not overlap_found:
+                kept.append(a)
+        
+        valid_assignments.extend(kept)
+    
+    return valid_assignments, freed_position_indices
+
+
 def assign_positions_automatically(settings, availability_caps=None):
     """
     Main automated assignment function using Hungarian algorithm.
     
-    Steps:
+    Uses iterative approach to handle overlapping positions:
     1. Get guards with availability > 0
     2. Apply availability caps if provided (demand > supply)
     3. Get all positions for next_week
-    4. Build score matrix (with overlap constraints built-in)
+    4. Build score matrix
     5. Run Hungarian algorithm (maximize)
     6. Post-process: remove impossible assignments (-9999)
-    7. Create PositionHistory records (ASSIGNED action)
+    7. Filter overlapping assignments per guard (keep highest scores)
+    8. For freed positions, re-run with remaining guard slots
+    9. Repeat until no more improvements
+    10. Create PositionHistory records (ASSIGNED action)
     
     Args:
         settings: SystemSettings instance
@@ -307,62 +307,156 @@ def assign_positions_automatically(settings, availability_caps=None):
     
     logger.info(f"Assignment pool: {len(guards)} guards, {len(positions)} positions")
     
-    # Build score matrix (with guard duplication by availability)
-    score_matrix, row_to_guard_map, guard_work_periods_map, guard_positions_map = build_score_matrix(
-        guards,
-        positions,
-        settings,
-        availability_caps
+    # Track final assignments and slot usage per guard
+    final_assignments = []
+    assigned_position_indices = set()  # Positions already assigned
+    guard_slots_used = defaultdict(int)  # {guard_id: slots_used}
+    
+    # Track assigned positions per guard to check overlaps
+    guard_assigned_positions = defaultdict(list)  # {guard_id: [position objects]}
+    
+    iteration = 0
+    max_iterations = 10  # Safety limit
+    initial_total_slots = sum(
+        availability_caps.get(g.id, g.availability) 
+        for g in guards
     )
     
-    # Run Hungarian algorithm (maximize=True)
-    row_indices, position_indices = linear_sum_assignment(score_matrix, maximize=True)
-    
-    logger.info(f"Hungarian algorithm completed: {len(row_indices)} assignments proposed")
-    
-    # Post-process: filter out impossible assignments
-    valid_assignments = []
-    filtered_count = 0
-    
-    for row_idx, position_idx in zip(row_indices, position_indices):
-        score = score_matrix[row_idx, position_idx]
+    while iteration < max_iterations:
+        iteration += 1
+        logger.info(f"--- Iteration {iteration} ---")
         
-        if score == -9999:
-            # Impossible assignment - skip
-            filtered_count += 1
+        # Calculate remaining availability for each guard
+        remaining_caps = {}
+        available_guards = []
+        for g in guards:
+            cap = availability_caps.get(g.id, g.availability)
+            remaining = cap - guard_slots_used[g.id]
+            if remaining > 0:
+                remaining_caps[g.id] = remaining
+                available_guards.append(g)
+        
+        if not available_guards:
+            logger.info("No guards with remaining availability - stopping")
+            break
+        
+        # Build score matrix with remaining guards and positions
+        # Mask already-assigned positions
+        score_matrix, row_to_guard_map, _, _ = build_score_matrix(
+            available_guards,
+            positions,
+            settings,
+            remaining_caps
+        )
+        
+        # Mask already-assigned positions
+        for pos_idx in assigned_position_indices:
+            score_matrix[:, pos_idx] = -9999
+        
+        # Additionally, mask positions that would overlap with already-assigned positions
+        # for each guard
+        for row_idx, guard in enumerate(row_to_guard_map):
+            for pos_idx, position in enumerate(positions):
+                if score_matrix[row_idx, pos_idx] == -9999:
+                    continue  # Already masked
+                
+                # Check if this position overlaps with any already-assigned position
+                # for this guard
+                for assigned_pos in guard_assigned_positions[guard.id]:
+                    if positions_overlap(position, assigned_pos):
+                        score_matrix[row_idx, pos_idx] = -9999
+                        break
+        
+        # Check if any valid scores remain
+        valid_count = np.sum(score_matrix != -9999)
+        if valid_count == 0:
+            logger.info("No valid assignments remaining - stopping")
+            break
+        
+        # Run Hungarian algorithm
+        row_indices, position_indices = linear_sum_assignment(score_matrix, maximize=True)
+        
+        # Collect valid assignments from this iteration
+        iteration_assignments = []
+        
+        for row_idx, position_idx in zip(row_indices, position_indices):
+            score = score_matrix[row_idx, position_idx]
+            
+            if score == -9999:
+                continue
+            
             guard = row_to_guard_map[row_idx]
-            logger.debug(
-                f"Filtered impossible assignment: "
-                f"{guard.user.username} → Position #{positions[position_idx].id}"
-            )
-            continue
+            iteration_assignments.append({
+                'guard': guard,
+                'position': positions[position_idx],
+                'pos_idx': position_idx,
+                'score': score
+            })
         
-        guard = row_to_guard_map[row_idx]
-        valid_assignments.append({
-            'guard': guard,
-            'position': positions[position_idx],
-            'score': score
-        })
+        if not iteration_assignments:
+            logger.info("No valid assignments in this iteration - stopping")
+            break
+        
+        # Filter overlapping assignments (within this iteration's assignments)
+        valid_iter_assignments, freed = filter_overlapping_assignments(
+            iteration_assignments, 
+            positions
+        )
+        
+        if freed:
+            logger.info(f"Filtered {len(freed)} overlapping positions in iteration {iteration}")
+        
+        # Add to final assignments
+        new_assignments_count = 0
+        for a in valid_iter_assignments:
+            guard = a['guard']
+            position = a['position']
+            pos_idx = a['pos_idx']
+            
+            # Final check: ensure this doesn't overlap with guard's existing assignments
+            has_overlap = False
+            for existing_pos in guard_assigned_positions[guard.id]:
+                if positions_overlap(position, existing_pos):
+                    has_overlap = True
+                    logger.debug(
+                        f"Final overlap check: {guard.user.username} cannot take "
+                        f"{position.exhibition.name} - conflicts with {existing_pos.exhibition.name}"
+                    )
+                    break
+            
+            if has_overlap:
+                continue
+            
+            final_assignments.append(a)
+            assigned_position_indices.add(pos_idx)
+            guard_slots_used[guard.id] += 1
+            guard_assigned_positions[guard.id].append(position)
+            new_assignments_count += 1
+        
+        logger.info(f"Iteration {iteration}: {new_assignments_count} new assignments")
+        
+        if new_assignments_count == 0:
+            logger.info("No new assignments made - stopping")
+            break
     
+    logger.info(f"Completed after {iteration} iterations")
     logger.info(
-        f"After filtering: {len(valid_assignments)} valid assignments "
-        f"({filtered_count} impossible filtered)"
+        f"After filtering: {len(final_assignments)} valid assignments"
     )
     
     # Check for underutilization warning
-    total_slots = len(row_to_guard_map)
-    if filtered_count > 0:
-        utilization_rate = (len(valid_assignments) / total_slots) * 100
+    if len(final_assignments) < initial_total_slots:
+        utilization_rate = (len(final_assignments) / initial_total_slots) * 100
         logger.info(
-            f"Slot utilization: {len(valid_assignments)}/{total_slots} slots used "
+            f"Slot utilization: {len(final_assignments)}/{initial_total_slots} slots used "
             f"({utilization_rate:.1f}%)."
         )
     
-    # Create PositionHistory records directly (no need for cap enforcement - already in matrix)
+    # Create PositionHistory records
     created_count = 0
     guard_assignment_counts = {}  # Track how many positions each guard got
     
-    for assignment in valid_assignments:
+    for assignment in final_assignments:
         guard = assignment['guard']
         position = assignment['position']
         score = assignment['score']
@@ -397,9 +491,8 @@ def assign_positions_automatically(settings, availability_caps=None):
         'status': 'success',
         'total_guards': len(guards),
         'total_positions': len(positions),
-        'total_slots': len(row_to_guard_map),
-        'assignments_proposed': len(row_indices),
-        'assignments_filtered': filtered_count,
+        'total_slots': initial_total_slots,
+        'iterations': iteration,
         'assignments_created': created_count,
         'positions_remaining': len(positions) - created_count,
         'capping_occurred': capping_occurred,
