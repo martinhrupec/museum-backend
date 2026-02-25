@@ -12,8 +12,54 @@ import structlog
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from decimal import Decimal
+from collections import defaultdict
 
 logger = structlog.get_logger(__name__)
+
+
+def positions_overlap(pos1, pos2):
+    """
+    Check if two positions overlap in time.
+    
+    Positions overlap if they are on the same day AND their time ranges intersect.
+    Time ranges intersect if: start1 < end2 AND start2 < end1
+    
+    Args:
+        pos1: Position instance
+        pos2: Position instance
+    
+    Returns:
+        bool: True if positions overlap
+    """
+    if pos1.date != pos2.date:
+        return False
+    
+    return pos1.start_time < pos2.end_time and pos2.start_time < pos1.end_time
+
+
+def build_overlap_groups(positions):
+    """
+    Group positions that overlap in time.
+    
+    Returns a dict mapping each position index to a set of overlapping position indices.
+    Used to ensure a guard's row slots can only be assigned to non-overlapping positions.
+    
+    Args:
+        positions: List of Position instances
+    
+    Returns:
+        dict: {position_index: set of overlapping position indices}
+    """
+    n = len(positions)
+    overlap_map = defaultdict(set)
+    
+    for i in range(n):
+        for j in range(i + 1, n):
+            if positions_overlap(positions[i], positions[j]):
+                overlap_map[i].add(j)
+                overlap_map[j].add(i)
+    
+    return overlap_map
 
 
 def build_score_matrix(guards, positions, settings, availability_caps):
@@ -23,6 +69,12 @@ def build_score_matrix(guards, positions, settings, availability_caps):
     Guards are duplicated in the matrix according to their availability.
     E.g., if Guard A has availability=2, they appear as 2 rows in the matrix.
     This allows Hungarian algorithm to assign multiple positions per guard.
+    
+    IMPORTANT: Each guard's row slots are constrained so that overlapping positions
+    cannot be assigned to the same guard. This is done by:
+    1. For each guard, identifying which positions overlap
+    2. Assigning overlapping positions to DIFFERENT row slots of the same guard
+    3. Making impossible combinations have score -9999
     
     Matrix shape: (total_slots, n_positions) where total_slots = sum of all availabilities
     Each cell contains normalized score 0-1 for guard-position pair.
@@ -59,6 +111,14 @@ def build_score_matrix(guards, positions, settings, availability_caps):
         f"Building score matrix: {len(guards)} guards with {total_slots} total slots "
         f"x {n_positions} positions"
     )
+    
+    # Build position overlap map - which positions overlap with each other
+    overlap_map = build_overlap_groups(positions)
+    
+    # Log overlap info
+    overlapping_pairs = sum(len(v) for v in overlap_map.values()) // 2
+    if overlapping_pairs > 0:
+        logger.info(f"Found {overlapping_pairs} pairs of overlapping positions")
     
     # Initialize matrix and row mapping
     score_matrix = np.zeros((total_slots, n_positions))
@@ -113,13 +173,51 @@ def build_score_matrix(guards, positions, settings, availability_caps):
         priority_norm = priority_normalized[guard.id]
         valid_position_ids = guard_positions_map[guard.id]
         
+        # Get valid position indices for this guard
+        valid_position_indices = [
+            j for j, pos in enumerate(positions) 
+            if pos.id in valid_position_ids
+        ]
+        
+        # Group valid positions by overlap - positions that overlap must go to different slots
+        # Use greedy coloring: assign each position to the lowest slot number where it doesn't
+        # conflict with already-assigned positions in that slot
+        position_to_slot = {}  # {position_index: assigned_slot}
+        
+        for pos_idx in valid_position_indices:
+            # Find which slots are already "taken" by overlapping positions
+            taken_slots = set()
+            for overlap_idx in overlap_map.get(pos_idx, set()):
+                if overlap_idx in position_to_slot:
+                    taken_slots.add(position_to_slot[overlap_idx])
+            
+            # Assign to lowest available slot
+            assigned_slot = 0
+            while assigned_slot in taken_slots:
+                assigned_slot += 1
+            
+            # If assigned_slot >= guard_availability, this position can't be assigned
+            # (guard doesn't have enough slots for all non-overlapping work)
+            if assigned_slot < guard_availability:
+                position_to_slot[pos_idx] = assigned_slot
+            # else: position will get -9999 for all this guard's slots
+        
         # Create N rows for this guard (N = capped availability from caps dict)
         for slot in range(guard_availability):
             row_to_guard_map.append(guard)
             
             for j, position in enumerate(positions):
                 if position.id not in valid_position_ids:
-                    # Guard cannot work this position
+                    # Guard cannot work this position (not in their work periods)
+                    score_matrix[current_row, j] = -9999
+                    continue
+                
+                # Check if this position is assigned to this slot
+                assigned_slot = position_to_slot.get(j)
+                if assigned_slot is None or assigned_slot != slot:
+                    # This position is either:
+                    # - Not assignable to this guard (too many overlaps for their availability)
+                    # - Assigned to a different slot
                     score_matrix[current_row, j] = -9999
                     continue
                 
@@ -167,9 +265,9 @@ def assign_positions_automatically(settings, availability_caps=None):
     1. Get guards with availability > 0
     2. Apply availability caps if provided (demand > supply)
     3. Get all positions for next_week
-    4. Build score matrix
+    4. Build score matrix (with overlap constraints built-in)
     5. Run Hungarian algorithm (maximize)
-    6. Post-process: remove impossible assignments (-9999) and respect caps
+    6. Post-process: remove impossible assignments (-9999)
     7. Create PositionHistory records (ASSIGNED action)
     
     Args:
@@ -255,10 +353,9 @@ def assign_positions_automatically(settings, availability_caps=None):
     total_slots = len(row_to_guard_map)
     if filtered_count > 0:
         utilization_rate = (len(valid_assignments) / total_slots) * 100
-        logger.warning(
-            f"Slot underutilization detected: {len(valid_assignments)}/{total_slots} slots used "
-            f"({utilization_rate:.1f}%). This may indicate guards' work_periods are too restrictive "
-            f"or don't match available positions."
+        logger.info(
+            f"Slot utilization: {len(valid_assignments)}/{total_slots} slots used "
+            f"({utilization_rate:.1f}%)."
         )
     
     # Create PositionHistory records directly (no need for cap enforcement - already in matrix)
