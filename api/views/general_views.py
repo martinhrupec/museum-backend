@@ -2,6 +2,7 @@
 General standalone view functions for session authentication.
 """
 
+from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import status, permissions
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
@@ -65,6 +66,7 @@ def session_logout(request):
     return Response({'message': 'Odjava uspješna'})
 
 
+@ensure_csrf_cookie
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def session_check(request):
