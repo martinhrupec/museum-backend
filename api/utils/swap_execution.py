@@ -207,12 +207,19 @@ def _send_swap_accepted_notification(swap_request):
         f"{position_offered.start_time.strftime('%H:%M')}-{position_offered.end_time.strftime('%H:%M')}"
     )
     
+    # Notification expires when the received position starts - after that it's irrelevant
+    from datetime import datetime
+    notification_expires_at = timezone.make_aware(
+        datetime.combine(position_offered.date, position_offered.start_time)
+    )
+
     AdminNotification.objects.create(
         created_by=None,  # System-generated
         title="Zamjena pozicije prihvaćena",
         message=message,
         cast_type=AdminNotification.CAST_UNICAST,
-        to_user=requesting_user
+        to_user=requesting_user,
+        expires_at=notification_expires_at
     )
     
     logger.info(

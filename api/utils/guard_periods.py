@@ -102,33 +102,27 @@ def get_positions_for_guard(all_positions, guard_work_periods):
     work_periods_set = set(guard_work_periods)
     
     matched_positions = []
-    
+
     for position in all_positions:
         pos_day_of_week = position.date.weekday()
         is_weekend = pos_day_of_week in [5, 6]
-        
-        # Determine shift type based on position start_time
+
+        # Determine shift times based on day type
         if is_weekend:
             morning_start = settings.weekend_morning_start
-            morning_end = settings.weekend_morning_end
             afternoon_start = settings.weekend_afternoon_start
-            afternoon_end = settings.weekend_afternoon_end
         else:
             morning_start = settings.weekday_morning_start
-            morning_end = settings.weekday_morning_end
             afternoon_start = settings.weekday_afternoon_start
-            afternoon_end = settings.weekday_afternoon_end
-        
-        # Check if position overlaps with morning shift
-        if (position.start_time <= morning_end and position.end_time >= morning_start):
+
+        # Match position to shift by exact start_time
+        # (special events are excluded from automated assignment, so all positions
+        #  have start_time == morning_start or start_time == afternoon_start)
+        if position.start_time == morning_start:
             if (pos_day_of_week, 'morning') in work_periods_set:
                 matched_positions.append(position)
-                continue
-        
-        # Check if position overlaps with afternoon shift
-        if (position.start_time <= afternoon_end and position.end_time >= afternoon_start):
+        elif position.start_time == afternoon_start:
             if (pos_day_of_week, 'afternoon') in work_periods_set:
                 matched_positions.append(position)
-                continue
-    
+
     return matched_positions

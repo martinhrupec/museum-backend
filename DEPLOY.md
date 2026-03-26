@@ -872,3 +872,9 @@ docker compose -f docker-compose.prod.yml exec web python manage.py check
 docker compose -f docker-compose.prod.yml exec web python manage.py check --deploy
 docker stats --no-stream    # Resource usage
 ```
+
+
+
+
+python manage.py migrate --noinput
+python manage.py create_default_groups

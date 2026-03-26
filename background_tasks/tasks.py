@@ -139,10 +139,8 @@ def generate_weekly_positions():
                 current_date += timedelta(days=1)
                 continue
             
-            # Check if exhibition is active on this specific day
-            if exhibition.is_active(timezone.make_aware(
-                timezone.datetime.combine(current_date, time.min)
-            )):
+            # Check if exhibition is active on this specific day (date comparison, not datetime)
+            if exhibition.start_date.date() <= current_date <= exhibition.end_date.date():
                 # Determine if weekend (Saturday=5, Sunday=6)
                 is_weekend = current_date.weekday() in [5, 6]
                 

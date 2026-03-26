@@ -79,7 +79,7 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
         """
         if self.action in ['list', 'retrieve']:
             return [IsAdminOrOwner()]
-        elif self.action in ['set_availability', 'set_work_periods', 'set_exhibition_preferences', 'set_day_preferences']:
+        elif self.action in ['set_availability', 'set_work_periods', 'set_this_week_periods', 'set_exhibition_preferences', 'set_day_preferences']:
             # Only guards can modify their own availability, periods, and preferences
             # Admins are explicitly NOT allowed to modify these
             return [permissions.IsAuthenticated()]
@@ -545,6 +545,120 @@ class GuardViewSet(AuditLogMixin, viewsets.ModelViewSet):
             'count': len(created_periods)
         })
     
+    @action(detail=True, methods=['post'])
+    def set_this_week_periods(self, request, pk=None):
+        """
+        Set guard's work periods for the CURRENT (this) week.
+
+        POST /api/guards/{id}/set_this_week_periods/
+        {
+            "periods": [
+                {"day_of_week": 1, "shift_type": "morning"},
+                {"day_of_week": 3, "shift_type": "afternoon"}
+            ]
+        }
+
+        Used to update availability for swap requests during the current week.
+        Automated assignment for this week is already done, so:
+        - No configuration window check
+        - No availability validation
+        - No cascade on preferences
+        Only the guard themselves can call this.
+        """
+        guard = self.get_object()
+
+        if request.user.role == User.ROLE_ADMIN:
+            return Response(
+                {'error': 'Administratori ne mogu mijenjati periode čuvara. Samo čuvari mogu postaviti svoje periode rada.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if guard.user != request.user:
+            return Response(
+                {'error': 'Možete mijenjati samo svoje periode rada.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        periods_data = request.data.get('periods', [])
+
+        if not periods_data:
+            return Response(
+                {'error': 'Polje "periods" je obavezno i mora sadržavati barem jedan period.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        for i, period in enumerate(periods_data):
+            if 'day_of_week' not in period or 'shift_type' not in period:
+                return Response(
+                    {'error': f'Period {i+1} mora imati "day_of_week" i "shift_type".'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            try:
+                day = int(period['day_of_week'])
+                if not (0 <= day <= 6):
+                    raise ValueError()
+            except (ValueError, TypeError):
+                return Response(
+                    {'error': f'Period {i+1}: "day_of_week" mora biti broj između 0 (ponedjeljak) i 6 (nedjelja).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if period['shift_type'] not in ['morning', 'afternoon']:
+                return Response(
+                    {'error': f'Period {i+1}: "shift_type" mora biti "morning" ili "afternoon".'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        settings = SystemSettings.get_active()
+        if not settings.this_week_start or not settings.this_week_end:
+            return Response(
+                {'error': 'Tekući tjedan još nije postavljen. Tjedni zadatak mora prvo završiti.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        # Replace all periods for this guard for the current week
+        GuardWorkPeriod.objects.filter(
+            guard=guard,
+            next_week_start=settings.this_week_start
+        ).delete()
+
+        created_periods = []
+        for period_data in periods_data:
+            period = GuardWorkPeriod.objects.create(
+                guard=guard,
+                day_of_week=period_data['day_of_week'],
+                shift_type=period_data['shift_type'],
+                is_template=False,
+                next_week_start=settings.this_week_start
+            )
+            created_periods.append(period)
+
+        from ..api_models import AuditLog
+        for period in created_periods:
+            AuditLog.log_create(
+                user=request.user,
+                instance=period,
+                request=request
+            )
+
+        logger.info(
+            "this_week_periods_set",
+            guard_id=guard.id,
+            guard_username=guard.user.username,
+            period_count=len(created_periods),
+            week_start=str(settings.this_week_start),
+            user_id=request.user.id
+        )
+
+        serializer = GuardWorkPeriodSerializer(created_periods, many=True)
+
+        return Response({
+            'message': f'Periodi rada za tekući tjedan ({settings.this_week_start} - {settings.this_week_end}) uspješno postavljeni.',
+            'periods': serializer.data,
+            'count': len(created_periods)
+        })
+
     @action(detail=True, methods=['post'])
     def set_exhibition_preferences(self, request, pk=None):
         """

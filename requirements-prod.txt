@@ -1,0 +1,24 @@
+# Production dependencies only
+django
+djangorestframework
+djangorestframework-simplejwt
+django-filter
+PyJWT
+pyyaml
+requests
+django-cors-headers
+psycopg2-binary
+celery
+redis
+django-redis
+django-celery-beat
+python-dotenv
+django-environ
+asgiref
+pytz
+sqlparse
+scipy
+drf-spectacular
+structlog
+python-json-logger
+gunicorn

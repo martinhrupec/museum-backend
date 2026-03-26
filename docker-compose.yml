@@ -38,6 +38,66 @@ services:
       timeout: 3s
       retries: 5
 
+
+  web:
+    image: mhrupec/museum:1.0
+    container_name: museum_web
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_HOST=postgres
+      - REDIS_URL=redis://redis:6379/1
+      - TZ=Europe/Zagreb
+      - RUN_MIGRATIONS=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - museum_network
+
+  celery_worker:
+    image: mhrupec/museum:1.0
+    container_name: museum_celery_worker
+    command: celery -A core worker -l INFO --concurrency=2
+    env_file:
+      - .env
+    environment:
+      - DATABASE_HOST=postgres
+      - REDIS_URL=redis://redis:6379/1
+      - TZ=Europe/Zagreb
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - museum_network
+
+  celery_beat:
+    image: mhrupec/museum:1.0
+    container_name: museum_celery_beat
+    command: celery -A core beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    env_file:
+      - .env
+    environment:
+      - DATABASE_HOST=postgres
+      - REDIS_URL=redis://redis:6379/1
+      - TZ=Europe/Zagreb
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - museum_network
+
 volumes:
   postgres_data:
     driver: local

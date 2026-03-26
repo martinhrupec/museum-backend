@@ -398,9 +398,23 @@ class NonWorkingDay(models.Model):
 # SIGNALS
 # ========================================
 
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
-from datetime import time, timedelta
+from datetime import timedelta
+
+
+@receiver(pre_save, sender=Exhibition)
+def track_exhibition_changes(sender, instance, **kwargs):
+    """Store old date/open_on values before save so post_save can compare."""
+    if instance.pk:
+        try:
+            old = Exhibition.objects.get(pk=instance.pk)
+            instance._old_start_date = old.start_date
+            instance._old_end_date = old.end_date
+            instance._old_open_on = list(old.open_on)
+            instance._old_number_of_positions = old.number_of_positions
+        except Exhibition.DoesNotExist:
+            pass
 
 
 @receiver(post_save, sender=Exhibition)
@@ -538,14 +552,6 @@ def _generate_positions_for_exhibition(exhibition, period_start, period_end, set
     if exhibition.is_special_event:
         return _generate_special_event_positions(exhibition, period_start, period_end)
     
-    # Convert to timezone-aware datetime for filtering
-    period_start_dt = timezone.make_aware(
-        timezone.datetime.combine(period_start, time.min)
-    )
-    period_end_dt = timezone.make_aware(
-        timezone.datetime.combine(period_end, time.max)
-    )
-    
     # Get non-working days for the period
     non_working_days = NonWorkingDay.objects.filter(
         date__gte=period_start,
@@ -583,11 +589,8 @@ def _generate_positions_for_exhibition(exhibition, period_start, period_end, set
             current_date += timedelta(days=1)
             continue
         
-        # Check if exhibition is active on this specific day
-        current_datetime = timezone.make_aware(
-            timezone.datetime.combine(current_date, time.min)
-        )
-        if exhibition.is_active(current_datetime):
+        # Check if exhibition is active on this specific day (date comparison, not datetime)
+        if exhibition.start_date.date() <= current_date <= exhibition.end_date.date():
             # Determine if weekend (Saturday=5, Sunday=6)
             is_weekend = current_date.weekday() in [5, 6]
             
@@ -626,5 +629,275 @@ def _generate_positions_for_exhibition(exhibition, period_start, period_end, set
                     created_count += 1
         
         current_date += timedelta(days=1)
-    
+
     return created_count
+
+
+def _generate_missing_positions(exhibition, period_start, period_end, settings):
+    """
+    Create positions for days that are within the valid schedule but have fewer
+    positions than required. Checks existing counts per shift before creating.
+    Handles both regular exhibitions and special events.
+
+    Returns:
+        int: Number of positions created
+    """
+    created_count = 0
+
+    if exhibition.is_special_event:
+        event_date = exhibition.start_date.date()
+        if period_start <= event_date <= period_end:
+            existing = Position.objects.filter(
+                exhibition=exhibition,
+                date=event_date
+            ).count()
+            for _ in range(max(0, exhibition.number_of_positions - existing)):
+                Position.objects.create(
+                    exhibition=exhibition,
+                    date=event_date,
+                    start_time=exhibition.event_start_time,
+                    end_time=exhibition.event_end_time
+                )
+                created_count += 1
+        return created_count
+
+    non_working_days = NonWorkingDay.objects.filter(
+        date__gte=period_start,
+        date__lte=period_end
+    )
+    non_working_full_days = {nwd.date for nwd in non_working_days if nwd.is_full_day}
+    non_working_morning = {
+        nwd.date for nwd in non_working_days
+        if not nwd.is_full_day and nwd.non_working_shift == NonWorkingDay.ShiftType.MORNING
+    }
+    non_working_afternoon = {
+        nwd.date for nwd in non_working_days
+        if not nwd.is_full_day and nwd.non_working_shift == NonWorkingDay.ShiftType.AFTERNOON
+    }
+
+    effective_start = max(period_start, exhibition.start_date.date())
+    effective_end = min(period_end, exhibition.end_date.date())
+    current_date = effective_start
+
+    while current_date <= effective_end:
+        day_of_week = current_date.weekday()
+
+        if (day_of_week not in settings.workdays
+                or day_of_week not in exhibition.open_on
+                or current_date in non_working_full_days):
+            current_date += timedelta(days=1)
+            continue
+
+        is_weekend = day_of_week in [5, 6]
+        if is_weekend:
+            morning_start = settings.weekend_morning_start
+            morning_end = settings.weekend_morning_end
+            afternoon_start = settings.weekend_afternoon_start
+            afternoon_end = settings.weekend_afternoon_end
+        else:
+            morning_start = settings.weekday_morning_start
+            morning_end = settings.weekday_morning_end
+            afternoon_start = settings.weekday_afternoon_start
+            afternoon_end = settings.weekday_afternoon_end
+
+        if current_date not in non_working_morning:
+            existing = Position.objects.filter(
+                exhibition=exhibition,
+                date=current_date,
+                start_time=morning_start
+            ).count()
+            for _ in range(max(0, exhibition.number_of_positions - existing)):
+                Position.objects.create(
+                    exhibition=exhibition,
+                    date=current_date,
+                    start_time=morning_start,
+                    end_time=morning_end
+                )
+                created_count += 1
+
+        if current_date not in non_working_afternoon:
+            existing = Position.objects.filter(
+                exhibition=exhibition,
+                date=current_date,
+                start_time=afternoon_start
+            ).count()
+            for _ in range(max(0, exhibition.number_of_positions - existing)):
+                Position.objects.create(
+                    exhibition=exhibition,
+                    date=current_date,
+                    start_time=afternoon_start,
+                    end_time=afternoon_end
+                )
+                created_count += 1
+
+        current_date += timedelta(days=1)
+
+    return created_count
+
+
+def _delete_excess_positions(exhibition, date, start_time, new_count):
+    """
+    Delete excess positions for a specific date/shift when number_of_positions decreases.
+
+    Priority:
+    1. Unassigned positions first (no history or latest action = CANCELLED)
+    2. Then guard with lowest priority_number
+    3. Tie-break: highest position id
+    """
+    from django.db.models import Subquery, OuterRef, Q
+
+    positions = list(Position.objects.filter(
+        exhibition=exhibition,
+        date=date,
+        start_time=start_time
+    ))
+    excess = len(positions) - new_count
+    if excess <= 0:
+        return
+
+    latest_action_sq = PositionHistory.objects.filter(
+        position=OuterRef('pk')
+    ).order_by('-action_time').values('action')[:1]
+
+    # Unassigned: no history or latest = CANCELLED
+    unassigned = list(
+        Position.objects.filter(exhibition=exhibition, date=date, start_time=start_time)
+        .annotate(latest_action=Subquery(latest_action_sq))
+        .filter(Q(latest_action__isnull=True) | Q(latest_action='CANCELED'))
+        .order_by('-id')
+    )
+
+    deleted = 0
+    for pos in unassigned:
+        if deleted >= excess:
+            return
+        pos.delete()
+        deleted += 1
+
+    if deleted >= excess:
+        return
+
+    # Assigned: sort by guard priority_number asc, then id desc
+    remaining_excess = excess - deleted
+    assigned = list(
+        Position.objects.filter(exhibition=exhibition, date=date, start_time=start_time)
+        .annotate(latest_action=Subquery(latest_action_sq))
+        .exclude(Q(latest_action__isnull=True) | Q(latest_action='CANCELED'))
+    )
+
+    def sort_key(pos):
+        guard = pos.get_assigned_guard()
+        priority = float(guard.priority_number) if guard and guard.priority_number else 0.0
+        return (priority, -pos.id)
+
+    assigned.sort(key=sort_key)
+    for pos in assigned[:remaining_excess]:
+        pos.delete()
+
+
+@receiver(post_save, sender=Exhibition)
+def adjust_positions_on_exhibition_update(sender, instance, created, **kwargs):
+    """
+    Adjust positions in this_week + next_week window when exhibition changes.
+
+    Handles:
+    - start_date / end_date change  → delete out-of-range positions, add missing
+    - open_on change                → delete removed-day positions, add added-day positions
+    - number_of_positions change    → add missing or delete excess per shift
+    """
+    if created:
+        return
+
+    old_start = getattr(instance, '_old_start_date', None)
+    if old_start is None:
+        return
+
+    old_end = instance._old_end_date
+    old_open_on = set(instance._old_open_on)
+    new_open_on = set(instance.open_on)
+    old_num = getattr(instance, '_old_number_of_positions', instance.number_of_positions)
+
+    dates_changed = (instance.start_date != old_start or instance.end_date != old_end)
+    open_on_changed = old_open_on != new_open_on
+    num_changed = instance.number_of_positions != old_num
+
+    if not dates_changed and not open_on_changed and not num_changed:
+        return
+
+    from .system_settings import SystemSettings
+    from django.db.models import Q
+
+    settings = SystemSettings.get_active()
+    if not (settings.this_week_start and settings.next_week_end):
+        return
+
+    period_start = settings.this_week_start
+    period_end = settings.next_week_end
+    new_start_date = instance.start_date.date()
+    new_end_date = instance.end_date.date()
+    removed_days = old_open_on - new_open_on
+
+    positions_qs = Position.objects.filter(
+        exhibition=instance,
+        date__gte=period_start,
+        date__lte=period_end,
+    )
+
+    # Delete positions outside new date range
+    if dates_changed:
+        positions_qs.filter(
+            Q(date__lt=new_start_date) | Q(date__gt=new_end_date)
+        ).delete()
+
+    # Delete positions on days removed from open_on
+    if removed_days:
+        current = period_start
+        while current <= period_end:
+            if current.weekday() in removed_days:
+                positions_qs.filter(date=current).delete()
+            current += timedelta(days=1)
+
+    # Handle number_of_positions decrease: delete excess per shift
+    if num_changed and instance.number_of_positions < old_num:
+        if instance.is_special_event:
+            event_date = instance.start_date.date()
+            if period_start <= event_date <= period_end:
+                _delete_excess_positions(
+                    instance, event_date,
+                    instance.event_start_time,
+                    instance.number_of_positions
+                )
+        else:
+            current = max(period_start, new_start_date)
+            end = min(period_end, new_end_date)
+            while current <= end:
+                day_of_week = current.weekday()
+                if day_of_week in settings.workdays and day_of_week in new_open_on:
+                    is_weekend = day_of_week in [5, 6]
+                    morning_start = (
+                        settings.weekend_morning_start if is_weekend
+                        else settings.weekday_morning_start
+                    )
+                    afternoon_start = (
+                        settings.weekend_afternoon_start if is_weekend
+                        else settings.weekday_afternoon_start
+                    )
+                    _delete_excess_positions(
+                        instance, current, morning_start, instance.number_of_positions
+                    )
+                    _delete_excess_positions(
+                        instance, current, afternoon_start, instance.number_of_positions
+                    )
+                current += timedelta(days=1)
+
+    # Add missing positions (covers: date expanded, open_on day added, num_of_pos increased)
+    _generate_missing_positions(instance, period_start, period_end, settings)
+
+    logger.info(
+        "positions_adjusted_for_exhibition_update",
+        exhibition_id=instance.id,
+        exhibition_name=instance.name,
+        dates_changed=dates_changed,
+        open_on_changed=open_on_changed,
+        num_changed=num_changed,
+    )
