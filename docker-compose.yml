@@ -40,7 +40,7 @@ services:
 
 
   web:
-    image: mhrupec/museum:1.0
+    image: mhrupec/museum:1.1
     container_name: museum_web
     ports:
       - "8000:8000"
@@ -61,7 +61,7 @@ services:
       - museum_network
 
   celery_worker:
-    image: mhrupec/museum:1.0
+    image: mhrupec/museum:1.1
     container_name: museum_celery_worker
     command: celery -A core worker -l INFO --concurrency=2
     env_file:
@@ -80,7 +80,7 @@ services:
       - museum_network
 
   celery_beat:
-    image: mhrupec/museum:1.0
+    image: mhrupec/museum:1.1
     container_name: museum_celery_beat
     command: celery -A core beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
     env_file:
