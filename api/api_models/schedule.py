@@ -398,7 +398,7 @@ class NonWorkingDay(models.Model):
 # SIGNALS
 # ========================================
 
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, post_delete, pre_save
 from django.dispatch import receiver
 from datetime import timedelta
 
@@ -901,3 +901,36 @@ def adjust_positions_on_exhibition_update(sender, instance, created, **kwargs):
         open_on_changed=open_on_changed,
         num_changed=num_changed,
     )
+
+
+def _invalidate_schedule_cache_for_position(position):
+    """
+    Invalidate schedule cache when a position is created or deleted.
+    Ensures the assigned/this-week and assigned/next-week endpoints
+    return fresh data that includes all current positions.
+    """
+    from django.core.cache import cache
+    from .system_settings import SystemSettings
+
+    settings = SystemSettings.get_active()
+
+    if settings.this_week_start and settings.this_week_end:
+        if settings.this_week_start <= position.date <= settings.this_week_end:
+            cache.delete(f'schedule_this_week_{settings.this_week_start.isoformat()}')
+
+    if settings.next_week_start and settings.next_week_end:
+        if settings.next_week_start <= position.date <= settings.next_week_end:
+            cache.delete(f'schedule_next_week_{settings.next_week_start.isoformat()}')
+
+
+@receiver(post_save, sender=Position)
+def invalidate_schedule_cache_on_position_save(sender, instance, created, **kwargs):
+    """Invalidate schedule cache when a new position is created."""
+    if created:
+        _invalidate_schedule_cache_for_position(instance)
+
+
+@receiver(post_delete, sender=Position)
+def invalidate_schedule_cache_on_position_delete(sender, instance, **kwargs):
+    """Invalidate schedule cache when a position is deleted."""
+    _invalidate_schedule_cache_for_position(instance)
