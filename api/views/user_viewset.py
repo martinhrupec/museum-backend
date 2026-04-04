@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from ..api_models import User
 from ..serializers import (
     UserBasicSerializer, UserDetailSerializer, UserAdminSerializer,
-    ChangePasswordSerializer
+    ChangePasswordSerializer, AdminSetPasswordSerializer
 )
 from ..permissions import IsAdminRole, IsAdminOrOwner
 from ..mixins import AuditLogMixin
@@ -101,13 +101,13 @@ class UserViewSet(AuditLogMixin, viewsets.ModelViewSet):
 
     def get_permissions(self):
         """Set permissions based on action using custom role-based permissions"""
-        if self.action in ['create', 'destroy']:
-            # Only ROLE_ADMIN can create/delete users
+        if self.action in ['create', 'destroy', 'set_password']:
+            # Only ROLE_ADMIN can create/delete users or set another user's password
             return [IsAdminRole()]
-        elif self.action in ['retrieve', 'update', 'partial_update']:
+        elif self.action in ['retrieve', 'update', 'partial_update', 'change_password']:
             # Admin can access all, users can access only their own
             return [IsAdminOrOwner()]
-        elif self.action in ['list', 'me', 'update_profile', 'change_password']:
+        elif self.action in ['list', 'me', 'update_profile']:
             # All authenticated users, but queryset filtering handles access
             return [permissions.IsAuthenticated()]
         else:
@@ -136,11 +136,25 @@ class UserViewSet(AuditLogMixin, viewsets.ModelViewSet):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['post'])
-    def change_password(self, request):
-        """Change current user's password"""
+    @action(detail=True, methods=['post'])
+    def change_password(self, request, pk=None):
+        """Change a user's own password (requires old password). Accessible by the user or admin."""
+        self.get_object()  # triggers IsAdminOrOwner object-level permission check
         serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response({'message': 'Lozinka je uspješno promijenjena.'})
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def set_password(self, request, pk=None):
+        """Admin-only: set any user's password without requiring old password."""
+        target_user = self.get_object()
+        serializer = AdminSetPasswordSerializer(
+            data=request.data,
+            context={'request': request, 'target_user': target_user}
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'message': f'Lozinka za korisnika {target_user.username} je uspješno postavljena.'})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

@@ -118,20 +118,20 @@ class UserAdminSerializer(serializers.ModelSerializer):
 
 class ChangePasswordSerializer(serializers.Serializer):
     """
-    Serializer for password change endpoint.
+    Serializer for password change endpoint (self-service).
     Validates old password and ensures new password confirmation.
     """
     old_password = serializers.CharField(required=True)
     new_password = serializers.CharField(required=True, min_length=8)
     new_password_confirm = serializers.CharField(required=True)
-    
+
     def validate_old_password(self, value):
         """Validate that the old password is correct"""
         user = self.context['request'].user
         if not user.check_password(value):
             raise serializers.ValidationError("Stara lozinka nije točna.")
         return value
-    
+
     def validate(self, data):
         """Validate that new passwords match"""
         if data['new_password'] != data['new_password_confirm']:
@@ -139,10 +139,34 @@ class ChangePasswordSerializer(serializers.Serializer):
                 'new_password_confirm': 'Nove lozinke se ne slažu.'
             })
         return data
-    
+
     def save(self, **kwargs):
         """Change the user's password"""
         user = self.context['request'].user
+        user.set_password(self.validated_data['new_password'])
+        user.save()
+        return user
+
+
+class AdminSetPasswordSerializer(serializers.Serializer):
+    """
+    Serializer for admin setting another user's password.
+    Does not require old password - admin only.
+    """
+    new_password = serializers.CharField(required=True, min_length=8)
+    new_password_confirm = serializers.CharField(required=True)
+
+    def validate(self, data):
+        """Validate that new passwords match"""
+        if data['new_password'] != data['new_password_confirm']:
+            raise serializers.ValidationError({
+                'new_password_confirm': 'Nove lozinke se ne slažu.'
+            })
+        return data
+
+    def save(self, **kwargs):
+        """Set the target user's password"""
+        user = self.context['target_user']
         user.set_password(self.validated_data['new_password'])
         user.save()
         return user
