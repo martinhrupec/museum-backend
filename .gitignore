@@ -1,3 +1,4 @@
+gunicorn.ctl
 venv/
 .venv/
 __pycache__/
