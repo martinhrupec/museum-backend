@@ -331,7 +331,7 @@ CELERY_BEAT_SCHEDULE = {
     },
     'run-automated-assignment': {
         'task': 'background_tasks.tasks.run_automated_assignment',
-        'schedule': crontab(hour=20, minute=0, day_of_week=3),  # Wednesday at 20:00 (default time)
+        'schedule': crontab(hour=19, minute=0, day_of_week=3),  # Wednesday at 19:00
     },
     'award-daily-completions': {
         'task': 'background_tasks.tasks.award_daily_completions',

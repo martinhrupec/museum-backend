@@ -791,7 +791,7 @@ Poštovani,
 {report.report_text}
 
 Lijep pozdrav,
-{report.guard.user.get_full_name() or report.guard.user.username}, {report.created_at.strftime('%d.%m.%Y %H:%M')}
+{report.guard.user.get_full_name() or report.guard.user.username}, {timezone.localtime(report.created_at).strftime('%d.%m.%Y %H:%M')}
         """
         
         logger.info(f"[send_report_email] Attempting to send email...")
