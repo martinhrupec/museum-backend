@@ -53,7 +53,7 @@ RUN chmod +x /docker-entrypoint.sh
 ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
 
 # Create non-root user for security
-RUN groupadd -r appuser && useradd -r -g appuser appuser \
+RUN groupadd -r appuser && useradd -r -m -g appuser appuser \
     && mkdir -p logs /tmp/prometheus_multiproc \
     && chown -R appuser:appuser /app /tmp/prometheus_multiproc
 
