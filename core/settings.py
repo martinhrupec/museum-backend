@@ -231,6 +231,7 @@ CORS_ALLOW_CREDENTIALS = True
 # PRODUCTION SECURITY SETTINGS
 # ===================================
 # HTTPS Settings - enable in production behind SSL
+SECURE_REDIRECT_EXEMPT = [r'^metrics$']
 SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=False)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
