@@ -23,5 +23,6 @@ scrape_configs:
   # Django /metrics endpoint — aktivirati kad dodas django-prometheus
   - job_name: 'django'
     metrics_path: /metrics
+    scheme: http
     static_configs:
       - targets: ['web:8000']
