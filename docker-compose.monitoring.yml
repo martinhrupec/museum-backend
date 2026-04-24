@@ -145,3 +145,4 @@ networks:
     driver: bridge
   museum_network:
     external: true
+    name: museum-backend_museum_network
