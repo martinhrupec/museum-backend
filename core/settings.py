@@ -103,6 +103,7 @@ INSTALLED_APPS = [
     "api",
     "background_tasks",  # Celery tasks
     "corsheaders",
+    "django_prometheus",
 ]
 
 # Add debug toolbar only in development
@@ -110,6 +111,7 @@ if DEBUG:
     INSTALLED_APPS.append("debug_toolbar")
 
 MIDDLEWARE = [
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -118,7 +120,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
 
 # Add debug toolbar middleware only in development
@@ -151,7 +153,7 @@ WSGI_APPLICATION = "core.wsgi.application"
 # PostgreSQL
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django_prometheus.db.backends.postgresql",
         "NAME": env('DATABASE_NAME'),
         "USER": env('DATABASE_USER'),
         "PASSWORD": env('DATABASE_PASSWORD'),

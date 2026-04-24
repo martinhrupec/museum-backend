@@ -199,8 +199,10 @@ def update_all_guard_priorities():
     sys_settings = SystemSettings.load()
     weeks_to_consider = sys_settings.points_life_weeks
     
-    now = timezone.now()
-    cycle_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    now = timezone.localtime(timezone.now())
+    # Always use this week's Monday 00:00 as cycle_start, regardless of when task runs
+    days_since_monday = now.weekday()  # Monday=0, Tuesday=1, ...
+    cycle_start = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
     
     guards = Guard.active_guards.all()
     

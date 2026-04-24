@@ -6,7 +6,6 @@ Handles the actual swapping of positions between guards.
 import structlog
 from django.db import transaction
 from django.utils import timezone
-from django.core.cache import cache
 
 from api.api_models.schedule import PositionHistory
 from api.api_models.textual_model import AdminNotification
@@ -86,10 +85,7 @@ def perform_position_swap(swap_request, accepting_guard, position_offered):
             
             # 4. Send notification to requesting guard
             _send_swap_accepted_notification(swap_request)
-            
-            # 5. Invalidate schedule cache for affected weeks
-            _invalidate_schedule_cache_for_swap(position_to_swap, position_offered)
-            
+
             return {
                 'success': True,
                 'message': 'Position swap completed successfully',
@@ -228,33 +224,4 @@ def _send_swap_accepted_notification(swap_request):
     )
 
 
-def _invalidate_schedule_cache_for_swap(position1, position2):
-    """
-    Invalidate schedule cache for weeks affected by swap.
-    
-    Args:
-        position1: First position in swap
-        position2: Second position in swap
-    """
-    from api.api_models.system_settings import SystemSettings
-    
-    settings = SystemSettings.get_active()
-    
-    # Check all positions against both weeks
-    positions_to_check = [position1, position2]
-    
-    for position in positions_to_check:
-        # Check this_week
-        if settings.this_week_start and settings.this_week_end:
-            if settings.this_week_start <= position.date <= settings.this_week_end:
-                cache_key = f'schedule_this_week_{settings.this_week_start.isoformat()}'
-                cache.delete(cache_key)
-                logger.info(f"Invalidated cache: {cache_key}")
-        
-        # Check next_week
-        if settings.next_week_start and settings.next_week_end:
-            if settings.next_week_start <= position.date <= settings.next_week_end:
-                cache_key = f'schedule_next_week_{settings.next_week_start.isoformat()}'
-                cache.delete(cache_key)
-                logger.info(f"Invalidated cache: {cache_key}")
 

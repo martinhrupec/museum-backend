@@ -1,0 +1,147 @@
+# ===================================
+# MONITORING STACK (PRODUCTION)
+# ===================================
+# Zaseban compose file — pokrece se nezavisno od aplikacije.
+# Spaja se na museum_network (external) kako bi Prometheus mogao
+# scrape-ati app kontejnere po imenu (npr. web:8000/metrics).
+#
+# Kontejneri:
+# - prometheus      (metrike, :9090)
+# - grafana         (UI za metrike + logove, :3000)
+# - node_exporter   (host-level metrike, :9100)
+# - cadvisor        (container-level metrike, :8080)
+# - loki            (agregacija logova, :3100)
+# - promtail        (log shipper -> Loki)
+#
+# Pokretanje:
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.monitoring.yml up -d
+#
+# Sve portove bindamo na 127.0.0.1 — pristup ide preko SSH tunela
+# ili Nginx reverse proxya (kao postgres u prod compose-u).
+
+services:
+  # Prometheus — scrape i pohrana metrika
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: museum_prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+      - museum_network
+
+  # Grafana — dashboardovi (metrike + logovi)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: museum_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - TZ=Europe/Zagreb
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+
+  # Node Exporter — host metrike (CPU, RAM, disk, network)
+  node_exporter:
+    image: prom/node-exporter:latest
+    container_name: museum_node_exporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    pid: host
+    ports:
+      - "127.0.0.1:9100:9100"
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+
+  # cAdvisor — container-level metrike
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: museum_cadvisor
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+
+  # Loki — storage za logove
+  loki:
+    image: grafana/loki:latest
+    container_name: museum_loki
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+
+  # Promtail — log shipper (Docker logovi + Django ./logs -> Loki)
+  promtail:
+    image: grafana/promtail:latest
+    container_name: museum_promtail
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./logs:/app/logs:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - monitoring_network
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+
+networks:
+  monitoring_network:
+    driver: bridge
+  museum_network:
+    external: true

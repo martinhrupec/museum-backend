@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 import structlog
 
-from ..api_models import User, Guard, Position, PositionHistory, Point, AdminNotification, SystemSettings, HourlyRateHistory
+from ..api_models import User, Guard, Position, PositionHistory, Point, AdminNotification, SystemSettings, HourlyRateHistory, AuditLog
 from ..serializers import PositionHistorySerializer, AssignedPositionScheduleSerializer, MonthlyPositionSnapshotSerializer
 from ..throttles import AssignPositionThrottle, CancelPositionThrottle, BulkCancelThrottle
 from ..mixins import AuditLogMixin
@@ -175,25 +175,6 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             raise serializers.ValidationError('Vaš račun nije aktivan.')
         return guard
     
-    def _invalidate_schedule_cache(self, position, settings):
-        """
-        Invalidate schedule cache when position assignment changes.
-        
-        Args:
-            position: Position instance that was modified
-            settings: SystemSettings instance
-        """
-        # Check which week this position belongs to
-        if settings.this_week_start and settings.this_week_end:
-            if settings.this_week_start <= position.date <= settings.this_week_end:
-                cache_key = f'schedule_this_week_{settings.this_week_start.isoformat()}'
-                cache.delete(cache_key)
-        
-        if settings.next_week_start and settings.next_week_end:
-            if settings.next_week_start <= position.date <= settings.next_week_end:
-                cache_key = f'schedule_next_week_{settings.next_week_start.isoformat()}'
-                cache.delete(cache_key)
-
     def _build_assigned_schedule(self, start_date, end_date):
         """Return serialized assignment snapshot for the provided date range"""
         positions_qs = Position.objects.filter(
@@ -337,7 +318,9 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 guard=guard,
                 action=action_type
             )
-            
+
+            AuditLog.log_create(user=request.user, instance=history, request=request)
+
             # Award points for jumping in on cancelled position (REPLACED action)
             # Only if:
             # - Position is in this_week OR
@@ -365,9 +348,6 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                         'points': float(reward),
                         'explanation': explanation
                     }
-            
-            # Invalidate schedule cache for affected week
-            self._invalidate_schedule_cache(position, settings)
             
             logger.info(
                 "position_assigned",
@@ -466,7 +446,9 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             guard=guard_for_cancel,
             action=PositionHistory.Action.CANCELLED
         )
-        
+
+        AuditLog.log_create(user=request.user, instance=history, request=request)
+
         # AUTO-CANCEL: If guard has pending swap request for this position, cancel it
         from ..api_models.textual_model import PositionSwapRequest
         pending_swap = PositionSwapRequest.objects.filter(
@@ -512,9 +494,6 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 'points': float(penalty),
                 'explanation': explanation
             }
-        
-        # Invalidate schedule cache for affected week
-        self._invalidate_schedule_cache(position, settings)
         
         logger.info(
             "position_cancelled",
@@ -647,7 +626,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
         # Apply penalty
         penalty = settings.penalty_for_being_late_with_notification
         estimated_delay = request.data.get('estimated_delay_minutes', '')
-        delay_info = f" ({estimated_delay} min delay)" if estimated_delay else ""
+        delay_info = f" ({estimated_delay} min kašnjenja)" if estimated_delay else ""
         explanation = f"Kazna za kašnjenje (uz pravovremenu najavu) ({position.exhibition.name}, {position.date}){delay_info}"
         
         point = Point.objects.create(
@@ -656,21 +635,24 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
             explanation=explanation
         )
         
-        # Create multicast notification for all guards working this shift today
-        # Determine shift type based on position start time
-        is_weekend = position.date.weekday() in [5, 6]
-        if is_weekend:
-            is_morning = position.start_time == settings.weekend_morning_start
-            shift_type = AdminNotification.SHIFT_MORNING if is_morning else AdminNotification.SHIFT_AFTERNOON
+        # Determine shift type based on the position's time slot, so notification reaches
+        # all guards whose positions match the same shift on that day.
+        # Check membership in both possible afternoon start times (15:00 weekday and 14:30
+        # weekend) - the actual start varies by weekend/weekday, and matching against both
+        # makes classification robust to shift-time configuration changes.
+        afternoon_starts = {settings.weekday_afternoon_start, settings.weekend_afternoon_start}
+
+        if position.start_time in afternoon_starts:
+            shift_type = AdminNotification.SHIFT_AFTERNOON
         else:
-            is_morning = position.start_time == settings.weekday_morning_start
-            shift_type = AdminNotification.SHIFT_MORNING if is_morning else AdminNotification.SHIFT_AFTERNOON
-        
+            shift_type = AdminNotification.SHIFT_MORNING
+
         shift_label = 'jutarnja' if shift_type == AdminNotification.SHIFT_MORNING else 'popodnevna'
+        guard_name = requester_guard.user.get_full_name() or requester_guard.user.username
         notification = AdminNotification.objects.create(
             created_by=None,  # System-created
             title=f"Prijava kašnjenja - {shift_label.title()} smjena",
-            message=f"{requester_guard.user.get_full_name() or requester_guard.user.username} prijavljuje kašnjenje {delay_info}.",
+            message=f"{guard_name} prijavljuje kašnjenje na poziciji {position.exhibition.name}{delay_info}.",
             cast_type=AdminNotification.CAST_MULTICAST,
             notification_date=today,
             shift_type=shift_type
@@ -790,6 +772,7 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                 guard=guard,
                 action=PositionHistory.Action.CANCELLED
             )
+            AuditLog.log_create(user=request.user, instance=history, request=request)
             cancelled_count += 1
             
             # Apply penalty only for the first position
@@ -816,10 +799,6 @@ class PositionHistoryViewSet(AuditLogMixin, viewsets.ModelViewSet):
                         'points': float(penalty),
                         'explanation': explanation
                     }
-        # Invalidate schedule cache for all affected weeks
-        # (positions_to_cancel can span multiple weeks)
-        for position in positions_to_cancel:
-            self._invalidate_schedule_cache(position, settings)
         return Response(
             {
                 'message': f'Uspješno otkazivanje. Broj otkazanih pozicija: {cancelled_count}',

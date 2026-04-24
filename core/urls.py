@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),  # Interactive testing
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),  # Clean documentation
+    path('', include('django_prometheus.urls')),
 ]
 
 # Debug Toolbar URLs (samo u DEBUG mode)

@@ -6,7 +6,6 @@ and determining which positions they can offer in return.
 """
 import structlog
 from datetime import timedelta
-from django.db.models import Q
 from django.utils import timezone
 
 from api.api_models.calculation import GuardWorkPeriod
@@ -234,27 +233,8 @@ def check_guard_eligibility_for_swap(guard, swap_request):
             'positions_can_offer': [],
             'reason': 'Cannot accept your own swap request'
         }
-    
-    # For special events, skip work_period checks (all guards can accept)
-    if not position_wanted.is_special_event:
-        # 1. Check if guard has work_periods for the position's week (only for regular exhibitions)
-        if not guard_has_work_periods(guard, position_wanted):
-            return {
-                'is_eligible': False,
-                'positions_can_offer': [],
-                'reason': 'Guard has no work periods configured for this week'
-            }
-        
-        # 2. Check if guard has work_period covering position_wanted (only for regular exhibitions)
-        work_period = get_work_period_for_position(guard, position_wanted)
-        if not work_period:
-            return {
-                'is_eligible': False,
-                'positions_can_offer': [],
-                'reason': 'Guard does not have work period for this position'
-            }
-    
-    # 3. Check if guard is free in that time slot
+
+    # 1. Check if guard is free in that time slot
     if is_guard_assigned_in_period(guard, position_wanted):
         return {
             'is_eligible': False,
@@ -264,13 +244,18 @@ def check_guard_eligibility_for_swap(guard, swap_request):
     
     # 4. Find positions guard can offer (where they're assigned and requesting_guard can take)
     settings = SystemSettings.get_active()
-    week_start = settings.this_week_start
-    week_end = settings.this_week_end
-    
-    guard_assigned_positions = get_guard_assigned_positions_in_week(guard, week_start, week_end)
-    
-    # Filter out positions that have already started - cannot offer a position that's in progress
     now = timezone.now()
+
+    # After manual assignment starts (default: Wednesday 20:00), include next week's positions too
+    manual_start = settings.manual_assignment_start_datetime
+    if manual_start and now >= manual_start and settings.next_week_end:
+        week_end = settings.next_week_end
+    else:
+        week_end = settings.this_week_end
+
+    guard_assigned_positions = get_guard_assigned_positions_in_week(guard, settings.this_week_start, week_end)
+
+    # Filter out positions that have already started - cannot offer a position that's in progress
     
     positions_can_offer = []
     for pos in guard_assigned_positions:

@@ -50,10 +50,12 @@ COPY . .
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
+ENV PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+
 # Create non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser appuser \
-    && mkdir -p logs \
-    && chown -R appuser:appuser /app
+    && mkdir -p logs /tmp/prometheus_multiproc \
+    && chown -R appuser:appuser /app /tmp/prometheus_multiproc
 
 # Switch to non-root user
 USER appuser
@@ -66,6 +68,7 @@ ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Default command (can be overridden in docker-compose)
 CMD ["gunicorn", "core.wsgi:application", \
+     "--config", "/app/gunicorn.conf.py", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "4", \
      "--timeout", "120", \

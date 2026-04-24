@@ -934,3 +934,9 @@ def invalidate_schedule_cache_on_position_save(sender, instance, created, **kwar
 def invalidate_schedule_cache_on_position_delete(sender, instance, **kwargs):
     """Invalidate schedule cache when a position is deleted."""
     _invalidate_schedule_cache_for_position(instance)
+
+
+@receiver(post_save, sender=PositionHistory)
+def invalidate_schedule_cache_on_history_change(sender, instance, **kwargs):
+    """Invalidate schedule cache when a position assignment changes (assign, cancel, swap, etc.)."""
+    _invalidate_schedule_cache_for_position(instance.position)

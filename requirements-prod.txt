@@ -22,3 +22,5 @@ drf-spectacular
 structlog
 python-json-logger
 gunicorn
+django-prometheus
+

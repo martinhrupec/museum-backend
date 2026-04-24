@@ -289,20 +289,20 @@ class SystemSettings(models.Model):
 
     @property
     def manual_assignment_end_day(self):
-        """Manual assignment ends 36 hours after automated assignment."""
+        """Manual assignment ends 39 hours after automated assignment."""
         reference = self._reference_assignment_datetime()
         if reference is None:
             return 0
-        manual_end_dt = reference + timedelta(hours=36)
+        manual_end_dt = reference + timedelta(hours=39)
         return manual_end_dt.weekday()
 
     @property
     def manual_assignment_end_time(self):
-        """Manual assignment ends 36 hours after automated assignment."""
+        """Manual assignment ends 39 hours after automated assignment."""
         reference = self._reference_assignment_datetime()
         if reference is None:
             return time_module(0, 0)
-        manual_end_dt = reference + timedelta(hours=36)
+        manual_end_dt = reference + timedelta(hours=39)
         return manual_end_dt.time()
 
     @property
@@ -331,11 +331,11 @@ class SystemSettings(models.Model):
 
     @property
     def manual_assignment_end_datetime(self):
-        """Manual window closes 36 hours after automated assignment."""
+        """Manual window closes 39 hours after automated assignment."""
         assignment_dt = self.automated_assignment_datetime
         if assignment_dt is None:
             return None
-        return assignment_dt + timedelta(hours=36)
+        return assignment_dt + timedelta(hours=39)
     
     @property
     def grace_period_start_datetime(self):
