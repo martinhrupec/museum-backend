@@ -1101,22 +1101,20 @@ def check_and_penalize_insufficient_positions():
     manual_end = settings.manual_assignment_end_datetime
     
     if not manual_end:
-        logger.debug("Manual assignment end time not yet calculated - skipping penalty check")
+        logger.info("check_and_penalize: manual_end is None (this_week_start not set?) - skipping")
         return "Manual assignment end time not set yet"
-    
+
     if now < manual_end:
-        logger.debug(f"Manual assignment period not ended yet. Ends at: {manual_end}")
+        logger.info(f"check_and_penalize: manual period still active. now={now}, manual_end={manual_end}")
         return "Manual assignment period still active"
-    
-    # Check if we've already penalized for this next_week period by looking in DB
-    # Look for Point records with "Insufficient positions for week" explanation created after manual_end
+
     existing_penalties = Point.objects.filter(
-        explanation__icontains=f'Insufficient positions for week starting {settings.next_week_start}',
+        explanation__icontains=f'pozicija u tjednu {settings.next_week_start}',
         created_at__gte=manual_end
     )
-    
+
     if existing_penalties.exists():
-        logger.debug(f"Penalty already applied for week {settings.next_week_start} - found {existing_penalties.count()} existing records")
+        logger.info(f"check_and_penalize: penalty already applied for week {settings.next_week_start} ({existing_penalties.count()} records)")
         return f"Penalty already applied for this week ({existing_penalties.count()} guards penalized)"
     
     # Run the penalty task
@@ -1126,28 +1124,49 @@ def check_and_penalize_insufficient_positions():
 
 
 @shared_task
-def penalize_insufficient_positions():
+def penalize_insufficient_positions(week_start=None, week_end=None, minimal_positions=None):
     """
     Penalize guards who took fewer positions than minimum required.
     Runs at the end of manual assignment period (~36h after automated assignment).
-    
+
     Penalty: penalty_for_assigning_less_then_minimal_positions per guard
     Applies to all active guards who took too few positions.
+
+    week_start/week_end: optional override for retroactive runs (date objects or ISO strings).
+    If omitted, uses settings.next_week_start / next_week_end.
+    minimal_positions: optional override for minimum required positions.
+    If omitted, uses settings.minimal_number_of_positions_in_week.
+    
+    example: 
+    python manage.py check_penalize_insufficient_positions --week 2026-05-11 --minimal 3
+
     """
     from api.api_models.user_type import Guard
-    
+
     settings = SystemSettings.get_active()
-    
-    if not settings.next_week_start or not settings.next_week_end:
-        logger.warning("Cannot penalize - next_week period not set")
-        return "Cannot penalize - next_week period not set"
-    
-    logger.info(f"Starting insufficient positions penalty check for next_week: {settings.next_week_start} - {settings.next_week_end}")
-    
-    # Get all positions for next_week
+
+    if week_start is None:
+        week_start = settings.next_week_start
+    if week_end is None:
+        week_end = settings.next_week_end
+
+    if isinstance(week_start, str):
+        from datetime import date as _date
+        week_start = _date.fromisoformat(week_start)
+    if isinstance(week_end, str):
+        from datetime import date as _date
+        week_end = _date.fromisoformat(week_end)
+
+    if not week_start or not week_end:
+        logger.warning("Cannot penalize - week period not set")
+        return "Cannot penalize - week period not set"
+
+    logger.info(f"Starting insufficient positions penalty check for week: {week_start} - {week_end}")
+
+    # Get all positions for the week
     next_week_positions = Position.objects.filter(
-        date__gte=settings.next_week_start,
-        date__lte=settings.next_week_end
+        date__gte=week_start,
+        date__lte=week_end
     )
     
     # Get all guards who are active
@@ -1173,13 +1192,13 @@ def penalize_insufficient_positions():
                 assigned_positions.append(position)
         
         assigned_count = len(assigned_positions)
-        minimal_required = settings.minimal_number_of_positions_in_week
+        minimal_required = minimal_positions if minimal_positions is not None else settings.minimal_number_of_positions_in_week
         
         if assigned_count < minimal_required:
             penalty = Decimal(str(settings.penalty_for_assigning_less_then_minimal_positions))
             explanation = (
-                f"Kazna za nedovoljno upisanih smjena"
-                f"({assigned_count}/{minimal_required} pozicija u tjednu {settings.next_week_start})"
+                f"Kazna za nedovoljno upisanih smjena "
+                f"({assigned_count}/{minimal_required} pozicija u tjednu {week_start})"
             )
             
             Point.objects.create(
@@ -1197,7 +1216,7 @@ def penalize_insufficient_positions():
     
     logger.info(
         f"Insufficient positions penalty complete: {penalties_given} penalties given, "
-        f"{total_penalty_points} total penalty points for week {settings.next_week_start}"
+        f"{total_penalty_points} total penalty points for week {week_start}"
     )
     
     return f"Penalized {penalties_given} guards for insufficient positions"
@@ -1254,8 +1273,8 @@ def expire_swap_requests():
                     guard=guard,
                     points=penalty,
                     explanation=(
-                        f"Penalty for no-show: Swap request expired for "
-                        f"{position.exhibition.name} on {position.date.strftime('%d.%m.%Y')} "
+                        f"Kazna za nedolazak: zahtjev za zamjenu je istekao za "
+                        f"{position.exhibition.name}: {position.date.strftime('%d.%m.%Y')} "
                         f"{position.start_time.strftime('%H:%M')}-{position.end_time.strftime('%H:%M')}"
                     )
                 )

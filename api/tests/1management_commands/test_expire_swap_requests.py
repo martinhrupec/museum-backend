@@ -75,7 +75,7 @@ class TestExpireSwapRequestsCommand:
         
         penalty = Point.objects.filter(guard=guard1).order_by('-date_awarded').first()
         assert penalty.points == Decimal('-5.00')
-        assert 'no-show' in penalty.explanation.lower() or 'swap' in penalty.explanation.lower()
+        assert 'w' in penalty.explanation.lower() or 'swap' in penalty.explanation.lower()
     
     def test_keep_recent_swap_requests(self, guard_user, sample_exhibition, system_settings):
         """Test that swap requests with future expires_at are not expired."""

@@ -288,8 +288,12 @@ class PositionHistory(models.Model):
         ]
     
     def __str__(self):
-        return f"Pozicija: {self.position.exhibition.name}, " \
-               f"čuvar: {self.guard.user.username} - akcija: {self.action} - {self.action_time}"
+        pos = self.position
+        return (
+            f"Pozicija: {pos.exhibition.name}, "
+            f"datum: {pos.date} od {pos.start_time.strftime('%H:%M')} do {pos.end_time.strftime('%H:%M')}, "
+            f"čuvar: {self.guard.user.username} - akcija: {self.action}"
+        )
 
 
 class NonWorkingDay(models.Model):
